@@ -1,15 +1,60 @@
 "use client";
-import { Ticket, User, Store, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Ticket, User, Store, ShieldCheck } from "lucide-react";
+import { auth, db } from "../lib/firebase";
+import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [userUid, setUserUid] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(true);
 
-  const handleRoleSelection = (role: string) => {
-    // โค้ดส่วนนี้เดี๋ยวเราจะเชื่อม Firebase Auth ในอนาคต
-    // ตอนนี้ให้กดแล้วเปลี่ยนหน้าไปตาม Role ก่อน
-    router.push(`/${role}`);
+  // ตรวจสอบสถานะการล็อกอินเมื่อโหลดหน้าเว็บ
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUserUid(currentUser.uid);
+        // ตรวจสอบว่าเคยเลือก Role ไว้ในฐานข้อมูลหรือยัง
+        const userRef = doc(db, 'users', currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists() && userSnap.data().role) {
+          // ถ้ามี Role แล้ว ให้พาไปหน้านั้นเลยโดยอัตโนมัติ
+          router.push(`/${userSnap.data().role}`);
+        } else {
+          setIsProcessing(false);
+        }
+      } else {
+        // ถ้ายังไม่มีบัญชี ให้ล็อกอินแบบไม่ระบุตัวตน (Anonymous) อัตโนมัติ
+        signInAnonymously(auth).catch(console.error);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  const handleRoleSelection = async (role: string) => {
+    if (!userUid || isProcessing) return;
+    setIsProcessing(true);
+    
+    try {
+      // บันทึก Role ใหม่ลงใน Firestore
+      const userRef = doc(db, 'users', userUid);
+      await setDoc(userRef, { uid: userUid, role: role }, { merge: true });
+      
+      // เปลี่ยนหน้าไปตาม Role ที่เลือก
+      router.push(`/${role}`);
+    } catch (error) {
+      console.error("Error setting role:", error);
+      setIsProcessing(false);
+    }
   };
+
+  if (isProcessing) {
+    return <div className="min-h-screen bg-gray-200 flex items-center justify-center">กำลังโหลดข้อมูล...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4">
