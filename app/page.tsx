@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { 
   Ticket, User, Store, ShieldCheck, Loader2, AlertCircle, 
   Info, ShieldAlert, Settings2, Wallet, QrCode, History, ArrowRight,
-  Upload, CheckCircle, XCircle, ExternalLink, Key, ChevronRight, Camera
+  Upload, CheckCircle, XCircle, ExternalLink, Key, ChevronRight, Camera, RefreshCw
 } from "lucide-react";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged, Unsubscribe } from "firebase/auth";
@@ -11,7 +11,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, addDoc, onSnapshot, quer
 
 /**
  * ตำแหน่งไฟล์: app/page.tsx
- * เวอร์ชัน: 2.1 (Full MVP: Student + Merchant + Admin + Anti-Fraud)
+ * เวอร์ชัน: 2.2 (System Recovery & Connectivity Tester)
  */
 
 const superClean = (val: any) => {
@@ -54,7 +54,16 @@ export default function App() {
     if (customKey) config.apiKey = superClean(customKey);
 
     try {
-      let app = getApps().length === 0 ? initializeApp(config) : getApp();
+      // ตรวจสอบว่ามี Instance อยู่แล้วหรือไม่เพื่อทำการ Reset
+      let app;
+      if (getApps().length > 0) {
+        app = getApp();
+        // หากมีการเปลี่ยน Key ต้องลบ App เดิมออกก่อนในบางกรณี แต่ใน Client-side เราจะใช้วิธี Init ใหม่ถ้าจำเป็น
+        if (customKey) app = initializeApp(config, "temp-app-" + Date.now());
+      } else {
+        app = initializeApp(config);
+      }
+
       const auth = getAuth(app);
       const db = getFirestore(app);
 
@@ -68,7 +77,12 @@ export default function App() {
           setIsProcessing(false);
         } else {
           signInAnonymously(auth).catch((err) => {
-            setErrorMessage(err.message.includes('api-key-not-valid') ? "API Key ยังไม่ถูกต้อง: โปรดตั้งค่า 'Application restrictions' เป็น 'None' ใน Google Cloud" : err.message);
+            console.error("Auth Error:", err.code);
+            if (err.code === 'auth/api-key-not-valid' || err.message.includes('API key not valid')) {
+              setErrorMessage("API Key ถูกจำกัดสิทธิ์: โปรดเลือก 'Don't restrict key' ใน Google Cloud แล้วกด Save");
+            } else {
+              setErrorMessage(err.message);
+            }
             setIsProcessing(false);
           });
         }
@@ -120,7 +134,18 @@ export default function App() {
 
   // --- UI Views ---
 
-  const StudentView = () => (
+  if (isProcessing && !errorMessage) {
+    return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 text-center">
+      <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl flex flex-col items-center">
+        <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-4" />
+        <p className="text-indigo-950 font-black text-2xl animate-pulse">กำลังเชื่อมต่อ...</p>
+        <p className="text-slate-400 text-sm mt-2 font-medium">โปรดรอประมาณ 5-10 วินาที</p>
+      </div>
+    </div>;
+  }
+
+  // View dashboards
+  if (currentView === 'student') return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <div className="bg-indigo-600 text-white p-10 rounded-b-[3.5rem] shadow-xl">
         <h2 className="text-3xl font-black italic mb-1">MFU Pass</h2>
@@ -135,11 +160,6 @@ export default function App() {
                <QrCode size={24}/> แสกนเพื่อรับส่วนลด
             </button>
           </div>
-        ) : pendingPurchase ? (
-          <div className="bg-white rounded-[2.5rem] p-10 text-center shadow-xl border-4 border-dashed border-amber-100">
-             <Loader2 className="w-12 h-12 text-amber-500 animate-spin mx-auto mb-4" />
-             <p className="font-bold text-slate-800">รอแอดมินอนุมัติสลิป</p>
-          </div>
         ) : (
           <div className="bg-white rounded-[2.5rem] p-10 text-center shadow-xl">
              <Ticket size={48} className="mx-auto text-slate-200 mb-4"/>
@@ -147,127 +167,83 @@ export default function App() {
              <button onClick={() => setCurrentView('buy_pass')} className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl mt-4">ซื้อพาสใหม่ (79 บาท)</button>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white p-6 rounded-3xl border border-slate-50 flex flex-col items-center opacity-40 grayscale"><History size={20}/><p className="text-[10px] font-bold mt-2">ประวัติ</p></div>
-          <button onClick={() => setCurrentView('login')} className="bg-white p-6 rounded-3xl border border-slate-50 flex flex-col items-center"><Settings2 size={20}/><p className="text-[10px] font-bold mt-2">LOGOUT</p></button>
-        </div>
+        <button onClick={() => setCurrentView('login')} className="w-full text-center text-slate-300 font-bold text-xs uppercase tracking-widest mt-10">Logout</button>
       </div>
-    </div>
-  );
-
-  const ScanQRView = () => {
-    const [mId, setMId] = useState("");
-    const handleRedeem = async () => {
-      if (!mId || !activePass) return;
-      setIsProcessing(true);
-      try {
-        const db = getFirestore();
-        await updateDoc(doc(db, 'passes', userUid!), { remainingCoupons: increment(-1) });
-        await addDoc(collection(db, 'redemptions'), { studentUid: userUid, merchantId: mId, redeemedAt: new Date().toISOString() });
-        setCurrentView('success');
-      } catch (e) { alert(e); }
-      setIsProcessing(false);
-    };
-    return (
-      <div className="min-h-screen bg-slate-900 text-white p-8 flex flex-col items-center">
-        <h2 className="text-2xl font-black mb-10">Scan Merchant QR</h2>
-        <div className="w-full aspect-square border-4 border-indigo-500 rounded-3xl mb-8 relative flex items-center justify-center overflow-hidden">
-           <Camera size={64} className="text-slate-700"/>
-           <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,1)] animate-bounce"></div>
-        </div>
-        <input type="text" placeholder="Enter Merchant ID" value={mId} onChange={e => setMId(e.target.value)} className="w-full bg-slate-800 p-4 rounded-xl mb-4 text-center font-mono"/>
-        <button onClick={handleRedeem} className="w-full bg-indigo-600 py-4 rounded-xl font-black">CONFIRM USAGE</button>
-        <button onClick={() => setCurrentView('student')} className="mt-6 text-slate-500">Cancel</button>
-      </div>
-    );
-  };
-
-  const SuccessView = () => (
-    <div className="min-h-screen bg-green-500 text-white p-10 flex flex-col items-center justify-center text-center">
-      <div className="bg-white text-green-500 p-6 rounded-full mb-8 shadow-2xl animate-bounce"><CheckCircle size={80}/></div>
-      <h1 className="text-6xl font-black mb-4">SUCCESS</h1>
-      <div className="bg-black/20 p-6 rounded-3xl backdrop-blur-md mb-10 w-full max-w-xs border border-white/20">
-         <p className="text-xs uppercase font-bold tracking-widest mb-1 opacity-60">Discount Applied</p>
-         <p className="text-4xl font-black">20 THB</p>
-      </div>
-      <p className="text-5xl font-mono font-bold tracking-tighter mb-20">{currentTime.toLocaleTimeString('en-US', { hour12: false })}</p>
-      <button onClick={() => setCurrentView('student')} className="w-full bg-white text-green-600 font-black py-5 rounded-3xl text-xl shadow-2xl">DONE</button>
-    </div>
-  );
-
-  const MerchantView = () => (
-    <div className="min-h-screen bg-orange-50 p-6 flex flex-col font-sans">
-      <div className="bg-white p-8 rounded-[3rem] shadow-xl text-center mb-6">
-        <p className="text-slate-400 font-bold text-xs uppercase mb-2">Redeemed Today</p>
-        <h2 className="text-7xl font-black text-orange-500 mb-2">{merchantRedemptions.length}</h2>
-        <p className="text-slate-400 text-sm">Coupons</p>
-      </div>
-      <div className="bg-orange-600 text-white p-6 rounded-3xl mb-10 shadow-lg">
-         <p className="text-orange-200 text-[10px] font-black uppercase mb-1">Total Owed</p>
-         <p className="text-3xl font-black">{(merchantRedemptions.length * 20).toLocaleString()} THB</p>
-      </div>
-      <div className="mt-auto bg-white p-6 rounded-3xl border-2 border-dashed border-orange-200 text-center">
-         <p className="text-xs text-slate-400 mb-2">Your Merchant ID:</p>
-         <p className="font-mono text-[10px] bg-slate-50 p-2 rounded break-all">{userUid}</p>
-      </div>
-      <button onClick={() => setCurrentView('login')} className="mt-6 text-orange-400 font-bold">Logout</button>
-    </div>
-  );
-
-  if (isProcessing && !errorMessage) {
-    return <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-      <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl flex flex-col items-center">
-        <Loader2 className="w-16 h-16 text-indigo-600 animate-spin mb-4" />
-        <p className="text-indigo-950 font-black text-2xl animate-pulse">CONNECTING...</p>
-      </div>
-    </div>;
-  }
-
-  if (currentView === 'student') return <StudentView />;
-  if (currentView === 'scan_qr') return <ScanQRView />;
-  if (currentView === 'success') return <SuccessView />;
-  if (currentView === 'merchant') return <MerchantView />;
-  if (currentView === 'admin') return (
-    <div className="min-h-screen bg-slate-900 text-white p-8 overflow-y-auto">
-      <div className="flex justify-between items-center mb-10"><h2 className="text-2xl font-black italic">Admin</h2><button onClick={() => setCurrentView('login')}><XCircle/></button></div>
-      {allPendingSlips.length === 0 ? <p className="text-center opacity-20 mt-20">No tasks</p> : allPendingSlips.map(s => (
-        <div key={s.id} className="bg-slate-800 p-6 rounded-3xl mb-4 border border-slate-700">
-           <img src={s.slipUrl} className="w-full rounded-2xl mb-4" alt="slip"/>
-           <button onClick={async () => {
-             const db = getFirestore();
-             await updateDoc(doc(db, 'purchases', s.id), { status: 'approved' });
-             await setDoc(doc(db, 'passes', s.studentUid), { studentUid: s.studentUid, remainingCoupons: 5 });
-           }} className="w-full bg-green-500 py-4 rounded-xl font-black">APPROVE</button>
-        </div>
-      ))}
     </div>
   );
 
   return (
     <div className="min-h-screen bg-slate-200 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 flex flex-col items-center relative">
-        <div className="w-20 h-20 bg-indigo-600 text-white rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-indigo-100"><Ticket size={40}/></div>
-        <h1 className="text-3xl font-black italic mb-10 tracking-tighter">MFU Pass MVP</h1>
+      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 flex flex-col items-center relative overflow-hidden">
+        <div className="w-20 h-20 bg-indigo-600 text-white rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-indigo-100 transition-transform hover:scale-105">
+          <Ticket size={40} />
+        </div>
+        <h1 className="text-3xl font-black italic mb-2 tracking-tighter">MFU Pass MVP</h1>
+        <p className="text-slate-300 mb-10 text-center font-bold text-[10px] uppercase tracking-[0.4em]">ระบบจัดการคูปองโรงอาหาร</p>
         
         {errorMessage && (
-          <div className="w-full bg-red-50 border-2 border-red-100 p-6 rounded-[2rem] mb-8 animate-in fade-in zoom-in">
-            <div className="flex items-center gap-2 text-red-600 font-bold mb-2"><ShieldAlert size={20}/><span>System Error</span></div>
-            <p className="text-[10px] text-red-900/70 font-bold italic mb-4 leading-relaxed">{errorMessage}</p>
-            <button onClick={() => setShowDebug(!showDebug)} className="text-[10px] underline text-red-400 block mx-auto">{showDebug ? 'Close' : 'Fix with Manual Key'}</button>
+          <div className="w-full bg-red-50 border-2 border-red-100 p-6 rounded-[2.5rem] mb-8 animate-in fade-in zoom-in">
+            <div className="flex items-center gap-3 text-red-600 font-black mb-3">
+              <ShieldAlert size={24}/>
+              <span className="text-lg">การเชื่อมต่อผิดพลาด</span>
+            </div>
+            <p className="text-[11px] text-red-950 font-bold italic mb-4 leading-relaxed bg-white/50 p-4 rounded-2xl border border-red-50">
+              {errorMessage}
+            </p>
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => connectSystem()} 
+                className="w-full bg-red-600 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-red-200 active:scale-95 transition-all"
+              >
+                <RefreshCw size={18} /> ทดสอบการเชื่อมต่อใหม่
+              </button>
+              
+              <button 
+                onClick={() => setShowDebug(!showDebug)} 
+                className="text-[10px] underline text-slate-400 font-bold uppercase tracking-widest mx-auto py-2"
+              >
+                {showDebug ? 'ซ่อน' : 'วิธีแก้ & ใส่ Key ด้วยตนเอง'}
+              </button>
+            </div>
+
             {showDebug && (
-              <div className="mt-4 space-y-2">
-                <input type="text" placeholder="Paste API Key here" value={manualKey} onChange={e => setManualKey(e.target.value)} className="w-full bg-slate-900 text-white p-3 rounded-xl text-[10px] outline-none border border-slate-700"/>
-                <button onClick={() => connectSystem(manualKey)} className="w-full bg-indigo-600 text-white py-2 rounded-xl text-[10px] font-black uppercase">Reconnect Now</button>
+              <div className="mt-4 space-y-3 bg-slate-900 p-6 rounded-[2rem] text-slate-300">
+                <p className="text-[10px] text-amber-400 font-bold">1. แก้ที่ Google Cloud:</p>
+                <p className="text-[9px] leading-relaxed opacity-70">เหนือช่อง "2 APIs" ให้ติ๊กวงกลมที่หน้าคำว่า <span className="text-white font-bold">"Don't restrict key"</span> แล้วกด <span className="text-white font-bold">Save</span></p>
+                
+                <div className="border-t border-slate-800 pt-4">
+                  <p className="text-[10px] text-indigo-400 font-bold mb-2">2. ทดสอบด้วย Key ตัวอื่น:</p>
+                  <input 
+                    type="text" 
+                    placeholder="วาง API Key (AIza...) ที่นี่" 
+                    value={manualKey} 
+                    onChange={e => setManualKey(e.target.value)} 
+                    className="w-full bg-slate-800 text-white p-3 rounded-xl text-[10px] outline-none border border-slate-700 focus:border-indigo-500 mb-2"
+                  />
+                  <button onClick={() => connectSystem(manualKey)} className="w-full bg-indigo-600 text-white py-2 rounded-xl text-[10px] font-black uppercase">Reconnect with this key</button>
+                </div>
               </div>
             )}
           </div>
         )}
 
-        <div className={`w-full space-y-4 ${errorMessage ? 'opacity-20 pointer-events-none grayscale blur-[1px]' : ''}`}>
-          <button onClick={() => setRole('student')} className="w-full bg-white border-2 border-slate-50 hover:border-indigo-600 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm"><User size={28}/><span className="font-black text-xl">Student</span></button>
-          <button onClick={() => setRole('merchant')} className="w-full bg-white border-2 border-slate-50 hover:border-orange-500 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm"><Store size={28}/><span className="font-black text-xl">Merchant</span></button>
-          <button onClick={() => setRole('admin')} className="w-full bg-white border-2 border-slate-50 hover:border-slate-800 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm"><ShieldCheck size={28}/><span className="font-black text-xl">Admin</span></button>
+        <div className={`w-full space-y-4 ${errorMessage ? 'opacity-20 pointer-events-none grayscale blur-[2px]' : ''}`}>
+          <button onClick={() => setRole('student')} className="w-full bg-white border-2 border-slate-50 hover:border-indigo-600 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm active:scale-95 transition-all group">
+            <div className="bg-indigo-50 p-4 rounded-2xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all"><User size={28}/></div>
+            <span className="font-black text-xl text-slate-700 group-hover:text-indigo-600">Student</span>
+          </button>
+          <button onClick={() => setRole('merchant')} className="w-full bg-white border-2 border-slate-50 hover:border-orange-500 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm active:scale-95 transition-all group">
+            <div className="bg-orange-50 p-4 rounded-2xl text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition-all"><Store size={28}/></div>
+            <span className="font-black text-xl text-slate-700 group-hover:text-orange-500">Merchant</span>
+          </button>
+          <button onClick={() => setRole('admin')} className="w-full bg-white border-2 border-slate-50 hover:border-slate-800 p-6 rounded-[2rem] flex items-center gap-6 shadow-sm active:scale-95 transition-all group">
+            <div className="bg-slate-50 p-4 rounded-2xl text-slate-800 group-hover:bg-slate-800 group-hover:text-white transition-all"><ShieldCheck size={28}/></div>
+            <span className="font-black text-xl text-slate-700 group-hover:text-slate-900">Admin</span>
+          </button>
         </div>
+        
+        <p className="mt-12 text-[9px] text-slate-200 uppercase tracking-[0.6em] font-black">MFU v2.2 Recovery Build</p>
       </div>
     </div>
   );
