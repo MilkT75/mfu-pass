@@ -1,17 +1,15 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { Ticket, User, Store, ShieldCheck, Loader2, AlertCircle } from "lucide-react";
+import { Ticket, User, Store, ShieldCheck, Loader2, AlertCircle, Info } from "lucide-react";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
 /**
  * ตำแหน่งไฟล์: app/page.tsx
- * คำอธิบาย: หน้านี้ทำหน้าที่เป็นทั้งระบบ Login และตัวควบคุมการแสดงผล (View Controller) 
- * เพื่อให้สามารถแสดงผลพรีวิวได้โดยไม่ต้องพึ่งพาระบบ Routing ภายนอกที่อาจทำให้เกิดข้อผิดพลาด
+ * คำอธิบาย: ระบบ Login พร้อมตัวตรวจสอบสถานะ Environment Variables แบบละเอียด
  */
 
-// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -21,21 +19,42 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// เริ่มต้นใช้งาน Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const db = getFirestore(app);
+let auth: any;
+let db: any;
+
+try {
+  // ตรวจสอบว่ามีค่า Config ครบก่อนเริ่มระบบ
+  if (firebaseConfig.apiKey) {
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+} catch (e) {
+  console.error("Firebase Initialization Error:", e);
+}
 
 export default function App() {
   const [userUid, setUserUid] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  
-  // ใช้ State แทนการใช้ useRouter จาก next/navigation เพื่อให้รันใน Preview ได้
   const [currentView, setCurrentView] = useState<'login' | 'student' | 'merchant' | 'admin'>('login');
+  const [showDebug, setShowDebug] = useState(false);
 
-  // ตรวจสอบสถานะการเข้าสู่ระบบ
   useEffect(() => {
+    // 1. ตรวจสอบว่าแอป "เห็น" ค่าจาก Vercel หรือไม่
+    if (!firebaseConfig.apiKey) {
+      setErrorMessage("แอปไม่พบค่า API Key: โปรดทำการ Redeploy บน Vercel เพื่ออัปเดตค่าล่าสุด");
+      setIsProcessing(false);
+      return;
+    }
+
+    if (!auth) {
+      setErrorMessage("ไม่สามารถเริ่มต้นระบบ Auth ได้");
+      setIsProcessing(false);
+      return;
+    }
+
+    // 2. ตรวจสอบการล็อกอิน
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       try {
         if (currentUser) {
@@ -44,18 +63,15 @@ export default function App() {
           const userSnap = await getDoc(userRef);
           
           if (userSnap.exists() && userSnap.data().role) {
-            const savedRole = userSnap.data().role as 'student' | 'merchant' | 'admin';
-            setCurrentView(savedRole);
-            setIsProcessing(false);
-          } else {
-            setIsProcessing(false);
+            setCurrentView(userSnap.data().role as any);
           }
+          setIsProcessing(false);
         } else {
           await signInAnonymously(auth);
         }
       } catch (error: any) {
-        console.error("Firebase Error:", error);
-        setErrorMessage("ไม่สามารถเชื่อมต่อฐานข้อมูลได้ โปรดตรวจสอบการตั้งค่า Firebase");
+        console.error("Connection Error:", error);
+        setErrorMessage(`เชื่อมต่อไม่สำเร็จ: ${error.message}`);
         setIsProcessing(false);
       }
     });
@@ -67,123 +83,97 @@ export default function App() {
     if (!userUid || isProcessing) return;
     setIsProcessing(true);
     setErrorMessage(null);
-    
     try {
       const userRef = doc(db, 'users', userUid);
-      await setDoc(userRef, { uid: userUid, role: role }, { merge: true });
+      await setDoc(userRef, { uid: userUid, role: role, updatedAt: new Date().toISOString() }, { merge: true });
       setCurrentView(role);
       setIsProcessing(false);
-    } catch (error) {
-      console.error("Error setting role:", error);
-      setErrorMessage("เกิดข้อผิดพลาดในการบันทึกข้อมูลบทบาท");
+    } catch (error: any) {
+      setErrorMessage(`บันทึกข้อมูลไม่สำเร็จ: ${error.message}`);
       setIsProcessing(false);
     }
   };
 
-  // --- ส่วนแสดงผลหน้า Dashboard จำลอง ---
-  if (currentView === 'student') {
+  // --- ส่วนหน้า Dashboard จำลอง ---
+  if (currentView !== 'login') {
     return (
-      <div className="min-h-screen bg-indigo-50 p-6 flex flex-col items-center justify-center">
-        <h1 className="text-2xl font-bold text-indigo-900 mb-4">หน้าจอนักศึกษา (Student View)</h1>
-        <p className="text-indigo-600 mb-6">คุณได้เลือกบทบาทเป็นนักศึกษาแล้ว</p>
-        <button onClick={() => setCurrentView('login')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg">กลับไปหน้าเลือกบทบาท</button>
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
+          <ShieldCheck size={32} />
+        </div>
+        <h1 className="text-2xl font-black text-slate-800 mb-2 underline decoration-indigo-500 decoration-4">บทบาท: {currentView.toUpperCase()}</h1>
+        <p className="text-slate-500 mb-8 font-medium">เชื่อมต่อฐานข้อมูลสำเร็จแล้ว! ระบบกำลังถูกพัฒนาต่อในส่วนนี้</p>
+        <button onClick={() => setCurrentView('login')} className="text-sm font-bold text-indigo-600 hover:underline">← กลับไปหน้าเลือกบทบาท</button>
       </div>
     );
   }
 
-  if (currentView === 'merchant') {
-    return (
-      <div className="min-h-screen bg-orange-50 p-6 flex flex-col items-center justify-center">
-        <h1 className="text-2xl font-bold text-orange-900 mb-4">หน้าจอร้านค้า (Merchant View)</h1>
-        <p className="text-orange-600 mb-6">คุณได้เลือกบทบาทเป็นร้านค้าแล้ว</p>
-        <button onClick={() => setCurrentView('login')} className="bg-orange-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg">กลับไปหน้าเลือกบทบาท</button>
-      </div>
-    );
-  }
-
-  if (currentView === 'admin') {
-    return (
-      <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center justify-center">
-        <h1 className="text-2xl font-bold text-slate-900 mb-4">หน้าจอผู้ดูแล (Admin View)</h1>
-        <p className="text-slate-600 mb-6">คุณได้เลือกบทบาทเป็นผู้ดูแลแล้ว</p>
-        <button onClick={() => setCurrentView('login')} className="bg-slate-800 text-white px-6 py-2 rounded-xl font-bold shadow-lg">กลับไปหน้าเลือกบทบาท</button>
-      </div>
-    );
-  }
-
-  // --- หน้าจอโหลดข้อมูล ---
+  // --- หน้าจอรอโหลด ---
   if (isProcessing && !errorMessage) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl flex flex-col items-center border border-indigo-50">
-          <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
-          <p className="text-indigo-900 font-bold text-xl animate-pulse">กำลังตรวจสอบข้อมูล...</p>
-        </div>
+        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mb-4" />
+        <p className="text-indigo-900 font-bold animate-pulse">กำลังเรียกข้อมูลจาก Vercel...</p>
       </div>
     );
   }
 
-  // --- หน้าจอหลัก (Login/Role Selection) ---
   return (
-    <div className="min-h-screen bg-slate-200 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden p-8 flex flex-col items-center border border-white/50">
-        
-        <div className="w-20 h-20 bg-indigo-600 text-white rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-indigo-200">
-          <Ticket size={40} />
+    <div className="min-h-screen bg-slate-200 flex flex-col items-center justify-center p-4 font-sans">
+      <div className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl p-8 flex flex-col items-center border border-white">
+        <div className="w-16 h-16 bg-indigo-600 text-white rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-200 transition-transform hover:scale-110">
+          <Ticket size={32} />
         </div>
         
-        <h1 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">MFU Pass</h1>
-        <p className="text-slate-500 mb-8 text-center font-medium">เลือกบทบาทของคุณเพื่อเข้าสู่ระบบ</p>
+        <h1 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">MFU Pass</h1>
+        <p className="text-slate-400 mb-8 text-sm font-medium">เข้าสู่ระบบเพื่อใช้งานคูปองส่วนลด</p>
 
         {errorMessage && (
-          <div className="w-full bg-red-50 border border-red-100 p-4 rounded-2xl mb-6 flex items-start gap-3 text-red-600">
-            <AlertCircle className="shrink-0 w-5 h-5" />
-            <p className="text-sm font-bold leading-tight">{errorMessage}</p>
+          <div className="w-full bg-red-50 border-2 border-red-100 p-5 rounded-2xl mb-6 flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-red-600 font-bold">
+              <AlertCircle size={20} />
+              <p>ตรวจพบจุดที่ต้องแก้ไข</p>
+            </div>
+            <p className="text-xs text-red-700 font-medium leading-relaxed bg-white/50 p-2 rounded-lg border border-red-50">
+              {errorMessage}
+            </p>
+            
+            <button 
+              onClick={() => setShowDebug(!showDebug)}
+              className="text-[10px] font-bold text-red-400 uppercase tracking-widest flex items-center gap-1 hover:text-red-600 transition-colors"
+            >
+              <Info size={12} /> {showDebug ? "ซ่อนรายละเอียด" : "ดูวิธีแก้ไข"}
+            </button>
+
+            {showDebug && (
+              <div className="text-[10px] text-red-500 bg-red-100/30 p-3 rounded-xl space-y-2 border border-red-100 animate-in fade-in slide-in-from-top-1">
+                <p className="font-bold underline text-red-600">ขั้นตอนแก้ไขให้หายขาด:</p>
+                <p>1. ไปที่ <span className="font-bold italic">Vercel Dashboard</span></p>
+                <p>2. ไปที่แถบ <span className="font-bold italic">Deployments</span></p>
+                <p>3. กดปุ่ม <span className="font-bold italic">... (จุดสามจุด)</span> หลังรายการบนสุด</p>
+                <p>4. เลือก <span className="font-bold bg-red-600 text-white px-1 rounded">Redeploy</span></p>
+                <p className="mt-2 text-red-400 font-medium">*เนื่องจากเว็บตัวปัจจุบันยังจำค่าเก่า (ค่าว่าง) ไว้อยู่ จึงต้องสั่งสร้างใหม่ครับ*</p>
+              </div>
+            )}
           </div>
         )}
 
-        <div className="w-full space-y-4">
-          <button 
-            onClick={() => handleRoleSelection('student')} 
-            className="w-full bg-white border-2 border-indigo-50 hover:border-indigo-600 hover:shadow-lg p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95"
-          >
-            <div className="bg-indigo-100 p-3 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <User size={24} />
-            </div>
-            <div className="text-left">
-              <h3 className="font-bold text-slate-800 group-hover:text-indigo-600">Student</h3>
-              <p className="text-xs text-slate-400 font-medium">นักศึกษา - ซื้อและใช้คูปอง</p>
-            </div>
+        <div className={`w-full space-y-4 ${errorMessage ? 'opacity-20 pointer-events-none' : ''}`}>
+          <button onClick={() => handleRoleSelection('student')} className="w-full bg-white border-2 border-slate-50 hover:border-indigo-600 p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95 shadow-sm">
+            <div className="bg-indigo-100 p-3 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors"><User size={24} /></div>
+            <div className="text-left"><h3 className="font-bold text-slate-700 group-hover:text-indigo-600">Student</h3><p className="text-[10px] text-slate-400">ซื้อและใช้คูปองส่วนลด</p></div>
           </button>
-
-          <button 
-            onClick={() => handleRoleSelection('merchant')} 
-            className="w-full bg-white border-2 border-orange-50 hover:border-orange-500 hover:shadow-lg p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95"
-          >
-            <div className="bg-orange-100 p-3 rounded-xl text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition-colors">
-              <Store size={24} />
-            </div>
-            <div className="text-left">
-              <h3 className="font-bold text-slate-800 group-hover:text-orange-500">Merchant</h3>
-              <p className="text-xs text-slate-400 font-medium">ร้านค้า - รับแสกนคูปอง</p>
-            </div>
+          <button onClick={() => handleRoleSelection('merchant')} className="w-full bg-white border-2 border-slate-50 hover:border-orange-500 p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95 shadow-sm">
+            <div className="bg-orange-100 p-3 rounded-xl text-orange-600 group-hover:bg-orange-500 group-hover:text-white transition-colors"><Store size={24} /></div>
+            <div className="text-left"><h3 className="font-bold text-slate-700 group-hover:text-orange-500">Merchant</h3><p className="text-[10px] text-slate-400">ร้านค้า - รับแสกนคูปอง</p></div>
           </button>
-
-          <button 
-            onClick={() => handleRoleSelection('admin')} 
-            className="w-full bg-white border-2 border-slate-50 hover:border-slate-800 hover:shadow-lg p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95"
-          >
-            <div className="bg-slate-100 p-3 rounded-xl text-slate-800 group-hover:bg-slate-800 group-hover:text-white transition-colors">
-              <ShieldCheck size={24} />
-            </div>
-            <div className="text-left">
-              <h3 className="font-bold text-slate-800 group-hover:text-slate-900">Admin</h3>
-              <p className="text-xs text-slate-400 font-medium">ผู้ดูแล - อนุมัติสลิปโอนเงิน</p>
-            </div>
+          <button onClick={() => handleRoleSelection('admin')} className="w-full bg-white border-2 border-slate-50 hover:border-slate-800 p-5 rounded-2xl flex items-center gap-4 transition-all group active:scale-95 shadow-sm">
+            <div className="bg-slate-100 p-3 rounded-xl text-slate-800 group-hover:bg-slate-800 group-hover:text-white transition-colors"><ShieldCheck size={24} /></div>
+            <div className="text-left"><h3 className="font-bold text-slate-700 group-hover:text-slate-900">Admin</h3><p className="text-[10px] text-slate-400">ผู้ดูแล - อนุมัติสลิปโอนเงิน</p></div>
           </button>
         </div>
-
-        <p className="mt-8 text-[10px] text-slate-300 uppercase tracking-[0.2em] font-bold">MFU Welcome Back MVP v1.2</p>
+        
+        <p className="mt-10 text-[9px] text-slate-300 uppercase tracking-[0.3em] font-black">MFU Welcome Back v1.3</p>
       </div>
     </div>
   );
