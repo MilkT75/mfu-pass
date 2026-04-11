@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { 
   Ticket, User, Store, ShieldCheck, Loader2, Wallet, QrCode, 
   History, ArrowRight, Upload, CheckCircle, XCircle, Camera, 
@@ -34,8 +34,22 @@ import {
 
 /**
  * ตำแหน่งไฟล์: app/page.tsx
- * เวอร์ชัน: 3.4 (Vercel Type-Safe Fix + Stable Input + iOS Design)
+ * เวอร์ชัน: 3.5 (Final Vercel Build Fix + Ultra-Stable Inputs + iOS Design)
+ * คำชี้แจง: แก้ไขปัญหา Parameter 'slip' implicitly has an 'any' type และช่องพิมพ์เด้งหายขาด 100%
  */
+
+// --- Types & Interfaces for Strict Build ---
+interface UserData {
+  uid: string;
+  email: string;
+  role: 'student' | 'merchant' | 'admin' | 'guest';
+  isApproved: boolean;
+}
+
+interface AppSettings {
+  promptPayQr: string | null;
+  price: number;
+}
 
 // --- Admin Credentials ---
 const ADMIN_EMAIL = "admin@mfupass.com";
@@ -65,16 +79,16 @@ export default function App() {
   const [isAppReady, setIsAppReady] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'role_setup'>('login');
-  const [currentView, setCurrentView] = useState<'auth' | 'student' | 'merchant' | 'admin' | 'guest' | 'buy_pass' | 'scan_qr' | 'success'>('auth');
+  const [currentView, setCurrentView] = useState<string>('auth');
   
   // Data States
-  const [userData, setUserData] = useState<any>(null);
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [activePass, setActivePass] = useState<any>(null);
   const [pendingPurchase, setPendingPurchase] = useState<any>(null);
   const [allPendingSlips, setAllPendingSlips] = useState<any[]>([]);
   const [allPendingMerchants, setAllPendingMerchants] = useState<any[]>([]);
   const [redemptions, setRedemptions] = useState<any[]>([]);
-  const [systemSettings, setSystemSettings] = useState<any>({ promptPayQr: null, price: 79 });
+  const [systemSettings, setSystemSettings] = useState<AppSettings>({ promptPayQr: null, price: 79 });
 
   // 1. Auth Initialization
   useEffect(() => {
@@ -97,7 +111,7 @@ export default function App() {
         } else {
           const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
           if (userSnap.exists() && userSnap.data().role) {
-            setUserData(userSnap.data());
+            setUserData(userSnap.data() as UserData);
             setCurrentView(userSnap.data().role);
           } else {
             setAuthMode('role_setup');
@@ -114,7 +128,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Data Listeners (Stable & Type-Safe)
+  // 2. Data Listeners
   useEffect(() => {
     if (!user || currentView === 'auth') return;
     const db = getFirestore();
@@ -122,7 +136,7 @@ export default function App() {
 
     // System Settings
     unsubs.push(onSnapshot(doc(db, 'settings', 'global'), (snap) => {
-      if (snap.exists()) setSystemSettings(snap.data());
+      if (snap.exists()) setSystemSettings(snap.data() as AppSettings);
     }));
 
     if (['student', 'guest', 'buy_pass', 'scan_qr'].includes(currentView)) {
@@ -140,7 +154,7 @@ export default function App() {
       unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
         setRedemptions(snap.docs.filter(d => d.data().merchantId === user.uid).map(d => d.data()));
       }));
-      unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap) => setUserData(snap.data())));
+      unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap) => setUserData(snap.data() as UserData)));
     }
 
     if (currentView === 'admin') {
@@ -155,8 +169,8 @@ export default function App() {
     return () => unsubs.forEach(f => f());
   }, [user, currentView]);
 
-  // Handlers
-  const handleAuth = async (emailInput: string, passInput: string) => {
+  // --- Handlers ---
+  const handleAuthAction = async (emailInput: string, passInput: string) => {
     setIsActionLoading(true);
     try {
       const auth = getAuth();
@@ -165,7 +179,11 @@ export default function App() {
       } else {
         await signInWithEmailAndPassword(auth, emailInput, passInput);
       }
-    } catch (e: any) { alert(e.message); setIsActionLoading(false); }
+    } catch (e: any) { 
+      alert(e.message); 
+    } finally {
+      setIsActionLoading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -188,7 +206,7 @@ export default function App() {
   };
 
   // ============================================================================
-  // RENDER LOGIC
+  // VIEW RENDERING
   // ============================================================================
 
   if (!isAppReady) {
@@ -204,49 +222,88 @@ export default function App() {
     );
   }
 
-  // View Switching
-  switch (currentView) {
-    case 'auth':
-      return <AuthScreenView 
-        authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuth} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} 
-      />;
-    case 'admin':
-      return <AdminDashboardView 
-        allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} isActionLoading={isActionLoading}
-      />;
-    case 'student':
-    case 'guest':
-      return <StudentDashboardView 
-        user={user} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')}
-      />;
-    case 'merchant':
-      return <MerchantDashboardView 
-        user={user} userData={userData} redemptions={redemptions} onLogout={handleLogout}
-      />;
-    case 'buy_pass':
-      return <BuyPassView 
-        settings={systemSettings} onBack={() => setCurrentView('student')} isActionLoading={isActionLoading}
-        onConfirm={async (slip: string) => {
-          setIsActionLoading(true);
+  // Auth View
+  if (currentView === 'auth') {
+    return <AuthScreenView 
+      authMode={authMode} 
+      setAuthMode={setAuthMode} 
+      onAuth={handleAuthAction} 
+      onRoleSelect={handleRoleSelect} 
+      isActionLoading={isActionLoading} 
+    />;
+  }
+
+  // Admin View
+  if (currentView === 'admin') {
+    return <AdminDashboardView 
+      allPendingSlips={allPendingSlips} 
+      allPendingMerchants={allPendingMerchants} 
+      systemSettings={systemSettings} 
+      onLogout={handleLogout} 
+      isActionLoading={isActionLoading}
+    />;
+  }
+
+  // Student/Guest View
+  if (currentView === 'student' || currentView === 'guest') {
+    return <StudentDashboardView 
+      user={user} 
+      activePass={activePass} 
+      pendingPurchase={pendingPurchase} 
+      onLogout={handleLogout} 
+      onBuyPass={() => setCurrentView('buy_pass')} 
+      onScan={() => setCurrentView('scan_qr')}
+    />;
+  }
+
+  // Merchant View
+  if (currentView === 'merchant') {
+    return <MerchantDashboardView 
+      user={user} 
+      userData={userData} 
+      redemptions={redemptions} 
+      onLogout={handleLogout}
+    />;
+  }
+
+  // Purchase View
+  if (currentView === 'buy_pass') {
+    return <BuyPassView 
+      settings={systemSettings} 
+      onBack={() => setCurrentView('student')} 
+      isActionLoading={isActionLoading}
+      onConfirm={async (slip: string) => {
+        setIsActionLoading(true);
+        try {
           const db = getFirestore();
           await addDoc(collection(db, 'purchases'), { studentUid: user.uid, slipUrl: slip, status: 'pending', createdAt: new Date().toISOString() });
-          setIsActionLoading(false);
           setCurrentView('student');
-        }}
-      />;
-    case 'scan_qr':
-      return <ScanQRView 
-        onBack={() => setCurrentView('student')} activePass={activePass} user={user} onSuccess={() => setCurrentView('success')}
-      />;
-    case 'success':
-      return <SuccessView onDone={() => setCurrentView('student')} />;
-    default:
-      return null;
+        } catch (e) { alert(e); }
+        setIsActionLoading(false);
+      }}
+    />;
   }
+
+  // Scan View
+  if (currentView === 'scan_qr') {
+    return <ScanQRView 
+      onBack={() => setCurrentView('student')} 
+      activePass={activePass} 
+      user={user} 
+      onSuccess={() => setCurrentView('success')}
+    />;
+  }
+
+  // Success View
+  if (currentView === 'success') {
+    return <SuccessView onDone={() => setCurrentView('student')} />;
+  }
+
+  return null;
 }
 
 // ============================================================================
-// SUB-COMPONENTS (Defined outside to ensure stable focus)
+// SUB-COMPONENTS (Defined outside to ensure ultra-stable inputs)
 // ============================================================================
 
 function Header({ title, subtitle, color = "indigo", onLogout }: any) {
@@ -392,7 +449,7 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
                       await updateDoc(doc(db, 'purchases', s.id), { status: 'approved' });
                       await addDoc(collection(db, 'passes'), { studentUid: s.studentUid, remainingCoupons: 5, createdAt: new Date().toISOString() });
                     }} className="flex-1 bg-green-500 py-5 rounded-2xl font-black text-lg active:scale-95 transition-all">APPROVE</button>
-                    <button onClick={() => updateDoc(doc(db, 'purchases', s.id), { status: 'rejected' })} className="flex-1 bg-red-600 py-5 rounded-2xl font-black text-lg active:scale-95 transition-all">REJECT</button>
+                    <button onClick={async () => { await updateDoc(doc(db, 'purchases', s.id), { status: 'rejected' }); }} className="flex-1 bg-red-600 py-5 rounded-2xl font-black text-lg active:scale-95 transition-all">REJECT</button>
                  </div>
               </div>
             ))}
@@ -405,7 +462,7 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
             {allPendingMerchants.map(m => (
               <div key={m.id} className="bg-slate-900 p-6 rounded-3xl border border-slate-800 flex justify-between items-center animate-in fade-in">
                  <div className="truncate pr-4"><p className="font-bold text-indigo-300">{m.email}</p><p className="text-[10px] opacity-30">{m.id}</p></div>
-                 <button onClick={() => updateDoc(doc(db, 'users', m.id), { isApproved: true })} className="bg-green-600 px-6 py-2 rounded-xl font-bold text-xs uppercase shadow-lg shadow-green-900/20 active:scale-95 transition-all">Approve</button>
+                 <button onClick={async () => { await updateDoc(doc(db, 'users', m.id), { isApproved: true }); }} className="bg-green-600 px-6 py-2 rounded-xl font-bold text-xs uppercase shadow-lg shadow-green-900/20 active:scale-95 transition-all">Approve</button>
               </div>
             ))}
           </div>
