@@ -4,7 +4,8 @@ import React, { useEffect, useState } from "react";
 import { 
   Ticket, User, Store, ShieldCheck, Loader2, Wallet, QrCode, 
   Clock, ChevronLeft, Mail, Lock, UserPlus, LogIn, Users, 
-  Upload, CheckCircle, Camera, LogOut, Settings, Save, RefreshCw, Plus, Minus 
+  Upload, CheckCircle, Camera, LogOut, Settings, Save, RefreshCw, 
+  Plus, Minus, Eye, EyeOff, Copy 
 } from "lucide-react";
 
 import { initializeApp, getApps, getApp } from "firebase/app";
@@ -107,16 +108,13 @@ export default function MFUPassApp() {
   // Real-time Listeners
   useEffect(() => {
     if (!user || currentView === 'auth') return;
-
     const db = getFirestore();
     const unsubs: (() => void)[] = [];
 
-    // Settings
     unsubs.push(onSnapshot(doc(db, 'settings', 'global'), (snap) => {
       if (snap.exists()) setSystemSettings(snap.data() as AppSettings);
     }));
 
-    // Student & Guest
     if (['student', 'guest'].includes(currentView)) {
       unsubs.push(onSnapshot(collection(db, 'passes'), (snap) => {
         const myPass = snap.docs.find(d => d.data().studentUid === user.uid);
@@ -129,24 +127,19 @@ export default function MFUPassApp() {
       }));
     }
 
-    // Merchant
     if (currentView === 'merchant') {
       unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
         setRedemptions(snap.docs.filter(d => d.data().merchantId === user.uid).map(d => d.data()));
       }));
     }
 
-    // Admin
     if (currentView === 'admin') {
       unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
         setAllPendingSlips(snap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseSlip)));
       }));
 
       unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
-        setAllPendingMerchants(
-          snap.docs.filter(d => d.data().role === 'merchant' && d.data().isApproved === false)
-            .map(d => ({ id: d.id, ...d.data() }))
-        );
+        setAllPendingMerchants(snap.docs.filter(d => d.data().role === 'merchant' && d.data().isApproved === false).map(d => ({ id: d.id, ...d.data() })));
       }));
     }
 
@@ -157,11 +150,8 @@ export default function MFUPassApp() {
     setIsActionLoading(true);
     try {
       const auth = getAuth();
-      if (authMode === 'register') {
-        await createUserWithEmailAndPassword(auth, email, password);
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
+      if (authMode === 'register') await createUserWithEmailAndPassword(auth, email, password);
+      else await signInWithEmailAndPassword(auth, email, password);
     } catch (e: any) {
       alert(e.message || "เกิดข้อผิดพลาด");
     } finally {
@@ -186,7 +176,6 @@ export default function MFUPassApp() {
     setIsActionLoading(false);
   };
 
-  // Loading
   if (!isAppReady) {
     return (
       <div className="min-h-screen bg-[#F2F2F7] flex items-center justify-center">
@@ -195,60 +184,64 @@ export default function MFUPassApp() {
     );
   }
 
-  // Route Views
-  if (currentView === 'auth') {
-    return <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} />;
-  }
+  if (currentView === 'auth') return <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} user={user} />;
 
-  if (currentView === 'admin') {
-    return <AdminDashboardView allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} />;
-  }
+  if (currentView === 'admin') return <AdminDashboardView allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} />;
 
-  if (currentView === 'student' || currentView === 'guest') {
-    return <StudentDashboardView user={user} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} />;
-  }
+  if (currentView === 'student' || currentView === 'guest') return <StudentDashboardView user={user} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} />;
 
-  if (currentView === 'merchant') {
-    return <MerchantDashboardView user={user} redemptions={redemptions} onLogout={handleLogout} />;
-  }
+  if (currentView === 'merchant') return <MerchantDashboardView user={user} redemptions={redemptions} onLogout={handleLogout} />;
 
-  if (currentView === 'buy_pass') {
-    return <BuyPassView settings={systemSettings} onBack={() => setCurrentView('student')} user={user} />;
-  }
+  if (currentView === 'buy_pass') return <BuyPassView settings={systemSettings} onBack={() => setCurrentView('student')} user={user} />;
 
-  if (currentView === 'scan_qr') {
-    return <ScanQRView onBack={() => setCurrentView('student')} activePass={activePass} user={user} onSuccess={() => setCurrentView('success')} />;
-  }
+  if (currentView === 'scan_qr') return <ScanQRView onBack={() => setCurrentView('student')} activePass={activePass} user={user} onSuccess={() => setCurrentView('success')} />;
 
-  if (currentView === 'success') {
-    return <SuccessView onDone={() => setCurrentView('student')} />;
-  }
+  if (currentView === 'success') return <SuccessView onDone={() => setCurrentView('student')} />;
 
   return null;
 }
 
-/* ==================== SUB COMPONENTS ==================== */
+/* ==================== SUB COMPONENTS (Responsive + แสดงรหัส + ตั้งค่า QR) ==================== */
 
-function Header({ title, subtitle, color = "indigo", onLogout }: any) {
+function Header({ title, subtitle, color = "indigo", onLogout, user }: any) {
   return (
-    <div className={`bg-${color}-600 text-white p-10 pt-16 rounded-b-[4rem] shadow-xl relative overflow-hidden`}>
-      <div className="absolute -right-10 -top-10 opacity-10 rotate-12"><Ticket size={240} /></div>
-      <div className="relative z-10 flex justify-between items-start">
-        <div>
-          <h2 className="text-4xl font-black italic tracking-tighter">{title}</h2>
-          <p className="text-white/70 text-xs font-bold uppercase tracking-widest mt-1">{subtitle}</p>
-        </div>
-        {onLogout && <button onClick={onLogout} className="bg-white/20 p-3 rounded-2xl hover:bg-white/30"><LogOut size={22} /></button>}
+    <div className={`bg-${color}-600 text-white px-6 py-8 md:py-10 rounded-b-[3rem] shadow-xl relative overflow-hidden max-w-2xl mx-auto w-full`}>
+      <div className="absolute -right-8 -top-8 opacity-10 rotate-12 pointer-events-none">
+        <Ticket size={180} />
       </div>
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-3xl md:text-4xl font-black italic tracking-tighter">{title}</h2>
+          <p className="text-white/70 text-sm font-medium">{subtitle}</p>
+        </div>
+        {onLogout && (
+          <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 px-4 py-3 rounded-2xl transition-all">
+            <LogOut size={22} />
+          </button>
+        )}
+      </div>
+      {/* แสดงรหัสเพื่อตรวจสอบ */}
+      {user && (
+        <div className="mt-6 bg-white/10 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between text-xs">
+          <div className="font-mono truncate max-w-[180px]">{user.uid}</div>
+          <button 
+            onClick={() => { navigator.clipboard.writeText(user.uid); alert("คัดลอก UID เรียบร้อย"); }}
+            className="text-white/80 hover:text-white flex items-center gap-1 text-[10px] font-medium"
+          >
+            <Copy size={14} /> Copy
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 function Card({ children, className = "" }: any) {
-  return <div className={`bg-white rounded-[2.75rem] shadow-xl p-8 ${className}`}>{children}</div>;
+  return <div className={`bg-white rounded-3xl shadow-xl p-6 md:p-8 ${className}`}>{children}</div>;
 }
 
-function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading }: any) {
+/* Auth Screen - Responsive */
+function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, user }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -258,46 +251,38 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
   };
 
   return (
-    <div className="min-h-screen bg-[#F2F2F7] flex flex-col items-center justify-center p-6 font-sans">
-      <div className="w-full max-w-[400px]">
-        <div className="flex flex-col items-center mb-12">
-          <div className="w-24 h-24 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center shadow-2xl mb-6 rotate-3">
-            <Ticket size={52} className="text-white" strokeWidth={2.8} />
+    <div className="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-4 md:p-8 font-sans">
+      <div className="w-full max-w-md md:max-w-lg bg-white rounded-3xl shadow-2xl p-8 md:p-12">
+        <div className="flex flex-col items-center mb-10">
+          <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center shadow-inner mb-6">
+            <Ticket size={48} className="text-white" />
           </div>
-          <h1 className="text-5xl font-black italic tracking-tighter text-slate-900">MFU Pass</h1>
-          <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.5em] mt-3">Digital Meal Coupons</p>
+          <h1 className="text-4xl md:text-5xl font-black italic tracking-tighter">MFU Pass</h1>
         </div>
 
         {authMode === 'role_setup' ? (
           <div className="space-y-4">
-            <p className="text-center font-bold text-slate-500 mb-8 uppercase text-xs tracking-widest">โปรดเลือกบทบาทของคุณ</p>
+            <p className="text-center text-slate-500 font-medium">เลือกบทบาทของคุณ</p>
             <RoleButton icon={<User />} title="นักศึกษา" onClick={() => onRoleSelect('student')} color="indigo" />
             <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => onRoleSelect('guest')} color="blue" />
             <RoleButton icon={<Store />} title="ร้านค้า" onClick={() => onRoleSelect('merchant')} color="orange" />
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="bg-white rounded-[2.5rem] p-3 shadow border border-slate-100">
-              <div className="relative">
-                <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                <input type="email" placeholder="อีเมล" value={email} onChange={e => setEmail(e.target.value)}
-                  className="w-full p-5 pl-14 outline-none font-medium text-lg" required />
-              </div>
-              <div className="h-px bg-slate-100 mx-6" />
-              <div className="relative">
-                <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                <input type="password" placeholder="รหัสผ่าน" value={password} onChange={e => setPassword(e.target.value)}
-                  className="w-full p-5 pl-14 outline-none font-medium text-lg" required />
-              </div>
+            <div className="space-y-2">
+              <input type="email" placeholder="อีเมล" value={email} onChange={e => setEmail(e.target.value)}
+                className="w-full px-6 py-5 rounded-3xl border border-slate-200 focus:border-indigo-500 outline-none text-lg" required />
+              <input type="password" placeholder="รหัสผ่าน" value={password} onChange={e => setPassword(e.target.value)}
+                className="w-full px-6 py-5 rounded-3xl border border-slate-200 focus:border-indigo-500 outline-none text-lg" required />
             </div>
 
-            <button disabled={isActionLoading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-6 rounded-2xl text-xl transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-70">
-              {isActionLoading ? <Loader2 className="animate-spin" /> : (authMode === 'login' ? <LogIn size={24} /> : <UserPlus size={24} />)}
+            <button disabled={isActionLoading} className="w-full bg-indigo-600 text-white font-black py-6 rounded-3xl text-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+              {isActionLoading ? <Loader2 className="animate-spin" /> : (authMode === 'login' ? <LogIn size={26} /> : <UserPlus size={26} />)}
               {authMode === 'login' ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'}
             </button>
 
-            <button type="button" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-slate-500 text-sm font-medium">
-              {authMode === 'login' ? 'ยังไม่มีบัญชี? สมัครสมาชิก' : 'มีบัญชีแล้ว? เข้าสู่ระบบ'}
+            <button type="button" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-slate-500 text-sm">
+              {authMode === 'login' ? 'ยังไม่มีบัญชี? สมัครเลย' : 'มีบัญชีแล้ว? เข้าสู่ระบบ'}
             </button>
           </form>
         )}
@@ -308,132 +293,113 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
 
 function RoleButton({ icon, title, onClick, color }: any) {
   return (
-    <button onClick={onClick} className="w-full bg-white p-7 rounded-[2.5rem] flex items-center gap-6 border-2 border-transparent hover:border-indigo-500 active:scale-95 transition-all shadow">
+    <button onClick={onClick} className="w-full bg-white border-2 border-transparent hover:border-indigo-500 p-6 rounded-3xl flex items-center gap-6 active:scale-95 transition-all shadow-sm">
       <div className={`bg-${color}-50 p-4 rounded-2xl text-${color}-600`}>{icon}</div>
       <div className="font-black text-2xl text-slate-800">{title}</div>
     </button>
   );
 }
 
+/* Admin Dashboard - Responsive + ตั้งค่า QR + ราคา */
 function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettings, onLogout }: any) {
   const [pricePerSet, setPricePerSet] = useState(systemSettings.pricePerSet || 79);
+  const [promptPayQr, setPromptPayQr] = useState(systemSettings.promptPayQr || "");
   const db = getFirestore();
 
-  const pendingSlips = allPendingSlips.filter((s: PurchaseSlip) => s.status === 'pending');
-  const approvedSlips = allPendingSlips.filter((s: PurchaseSlip) => s.status === 'approved');
+  const pendingSlips = allPendingSlips.filter((s: any) => s.status === 'pending');
+  const approvedSlips = allPendingSlips.filter((s: any) => s.status === 'approved');
 
-  const totalPending = pendingSlips.reduce((sum: number, s: PurchaseSlip) => sum + (s.totalAmount || 0), 0);
-  const totalApproved = approvedSlips.reduce((sum: number, s: PurchaseSlip) => sum + (s.totalAmount || 0), 0);
+  const totalPending = pendingSlips.reduce((sum: number, s: any) => sum + (s.totalAmount || 0), 0);
+  const totalApproved = approvedSlips.reduce((sum: number, s: any) => sum + (s.totalAmount || 0), 0);
+
+  const saveSettings = async () => {
+    await setDoc(doc(db, 'settings', 'global'), { pricePerSet, promptPayQr }, { merge: true });
+    alert("บันทึกการตั้งค่าเรียบร้อยแล้ว");
+  };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-8 pb-32 font-sans">
-      <div className="flex justify-between items-center mb-10">
-        <h1 className="text-3xl font-black italic text-indigo-400">Admin Panel</h1>
-        <button onClick={onLogout} className="p-3 bg-white/10 rounded-2xl"><LogOut size={24} /></button>
+    <div className="min-h-screen bg-slate-950 text-white px-4 py-8 md:px-8 font-sans max-w-3xl mx-auto">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-black text-indigo-400">Admin Panel</h1>
+        <button onClick={onLogout}><LogOut size={28} /></button>
       </div>
 
-      {/* ตั้งราคา */}
-      <div className="bg-slate-900 rounded-3xl p-8 mb-10">
-        <p className="text-indigo-300 font-bold mb-4">ราคา 1 เซ็ต (5 คูปอง)</p>
-        <div className="flex gap-4">
-          <input 
-            type="number" 
-            value={pricePerSet} 
-            onChange={(e) => setPricePerSet(Number(e.target.value))} 
-            className="flex-1 bg-black/60 text-5xl font-black text-center rounded-2xl p-6 outline-none" 
-          />
-          <button 
-            onClick={async () => {
-              await setDoc(doc(db, 'settings', 'global'), { pricePerSet, promptPayQr: systemSettings.promptPayQr }, { merge: true });
-              alert("บันทึกราคาเรียบร้อยแล้ว");
-            }}
-            className="bg-green-600 px-10 rounded-2xl font-black text-lg"
-          >
-            บันทึก
-          </button>
+      {/* ตั้งค่าราคา + QR */}
+      <div className="bg-slate-900 rounded-3xl p-6 md:p-8 mb-8">
+        <h3 className="font-bold text-indigo-300 mb-6 flex items-center gap-2"><Settings size={18} /> การตั้งค่าระบบ</h3>
+        
+        <div className="mb-8">
+          <p className="text-slate-400 text-sm mb-3">ราคา 1 เซ็ต (5 คูปอง)</p>
+          <input type="number" value={pricePerSet} onChange={e => setPricePerSet(Number(e.target.value))} 
+            className="w-full bg-black/60 text-5xl font-black text-center rounded-2xl p-6 outline-none" />
         </div>
+
+        <div>
+          <p className="text-slate-400 text-sm mb-3">PromptPay QR Code URL</p>
+          <textarea value={promptPayQr} onChange={e => setPromptPayQr(e.target.value)} rows={3}
+            className="w-full bg-black/60 rounded-2xl p-5 text-sm font-mono outline-none resize-none" placeholder="https://..." />
+          {promptPayQr && <img src={promptPayQr} className="mt-4 max-h-64 mx-auto rounded-2xl shadow-inner" alt="QR Preview" />}
+        </div>
+
+        <button onClick={saveSettings} className="w-full mt-8 bg-green-600 py-5 rounded-2xl font-black flex items-center justify-center gap-3">
+          <Save size={22} /> บันทึกการตั้งค่า
+        </button>
       </div>
 
       {/* สรุปยอดเงิน */}
-      <div className="grid grid-cols-2 gap-6 mb-12">
-        <div className="bg-slate-900 rounded-3xl p-8">
-          <p className="text-slate-400 text-sm">ยอดรอตรวจสอบ</p>
-          <p className="text-5xl font-black text-amber-400 mt-2">{totalPending.toLocaleString()} บาท</p>
+      <div className="grid grid-cols-2 gap-4 md:gap-6 mb-12">
+        <div className="bg-slate-900 rounded-3xl p-6 text-center">
+          <p className="text-amber-400 text-sm font-medium">รอตรวจสอบ</p>
+          <p className="text-5xl font-black mt-2">{totalPending.toLocaleString()} บาท</p>
         </div>
-        <div className="bg-slate-900 rounded-3xl p-8">
-          <p className="text-slate-400 text-sm">ยอดที่อนุมัติแล้ว</p>
-          <p className="text-5xl font-black text-green-400 mt-2">{totalApproved.toLocaleString()} บาท</p>
+        <div className="bg-slate-900 rounded-3xl p-6 text-center">
+          <p className="text-green-400 text-sm font-medium">อนุมัติแล้ว</p>
+          <p className="text-5xl font-black mt-2">{totalApproved.toLocaleString()} บาท</p>
         </div>
       </div>
 
       {/* รายการสลิป */}
-      <h3 className="uppercase text-xs font-black tracking-widest text-slate-400 mb-6">สลิปที่รอตรวจสอบ ({pendingSlips.length})</h3>
-      {pendingSlips.length === 0 ? (
-        <p className="text-slate-500 italic">ยังไม่มีสลิปที่รอตรวจสอบ</p>
-      ) : (
-        pendingSlips.map((slip: PurchaseSlip) => (
-          <div key={slip.id} className="bg-slate-900 rounded-3xl p-6 mb-8">
-            <div className="flex justify-between mb-4 text-sm">
-              <span>เซ็ต {slip.numSets} ชุด • {slip.totalAmount} บาท</span>
-              <span className="text-amber-400">รอตรวจสอบ</span>
-            </div>
-            <img src={slip.slipUrl} className="w-full rounded-2xl mb-6" alt="slip" />
-            <div className="flex gap-4">
-              <button 
-                onClick={async () => {
-                  await updateDoc(doc(db, 'purchases', slip.id), { status: 'approved' });
-                  await addDoc(collection(db, 'passes'), {
-                    studentUid: slip.studentUid,
-                    remainingCoupons: 5 * slip.numSets,
-                    createdAt: serverTimestamp()
-                  });
-                  alert("อนุมัติเรียบร้อยแล้ว");
-                }}
-                className="flex-1 bg-green-600 py-5 rounded-2xl font-black active:scale-95"
-              >
-                ✅ อนุมัติ
-              </button>
-              <button 
-                onClick={async () => await updateDoc(doc(db, 'purchases', slip.id), { status: 'rejected' })}
-                className="flex-1 bg-red-600 py-5 rounded-2xl font-black active:scale-95"
-              >
-                ❌ ปฏิเสธ
-              </button>
-            </div>
+      <h3 className="uppercase text-xs font-black tracking-widest text-slate-400 mb-4 px-2">สลิปที่รอตรวจสอบ ({pendingSlips.length})</h3>
+      {pendingSlips.map((slip: PurchaseSlip) => (
+        <div key={slip.id} className="bg-slate-900 rounded-3xl p-6 mb-6">
+          <div className="flex justify-between text-xs mb-4">
+            <span>เซ็ต {slip.numSets} • {slip.totalAmount} บาท</span>
           </div>
-        ))
-      )}
+          <img src={slip.slipUrl} className="w-full rounded-2xl mb-6" alt="slip" />
+          <div className="flex gap-4">
+            <button onClick={async () => {
+              await updateDoc(doc(db, 'purchases', slip.id), { status: 'approved' });
+              await addDoc(collection(db, 'passes'), { studentUid: slip.studentUid, remainingCoupons: 5 * slip.numSets });
+            }} className="flex-1 bg-green-600 py-5 rounded-2xl font-black">✅ อนุมัติ</button>
+            <button onClick={async () => await updateDoc(doc(db, 'purchases', slip.id), { status: 'rejected' })} className="flex-1 bg-red-600 py-5 rounded-2xl font-black">❌ ปฏิเสธ</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
+/* ส่วนที่เหลือ (Student, BuyPass, Merchant, ScanQR, Success) ถูกปรับให้ responsive แล้ว */
 function StudentDashboardView({ user, activePass, pendingPurchase, onLogout, onBuyPass, onScan }: any) {
   return (
-    <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-20">
-      <Header title="My Wallet" subtitle={user?.email} onLogout={onLogout} />
-      <div className="px-6 -mt-12 flex-1 space-y-8">
+    <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-12 max-w-2xl mx-auto w-full">
+      <Header title="My Wallet" subtitle={user?.email} user={user} onLogout={onLogout} />
+      <div className="px-6 flex-1 space-y-8">
         <Card>
           {pendingPurchase ? (
-            <div className="text-center py-16">
-              <Clock className="mx-auto text-amber-500 mb-8" size={80} />
-              <h3 className="text-2xl font-black">รอการตรวจสอบ</h3>
-              <p className="mt-3 text-slate-600">เซ็ต {pendingPurchase.numSets} ชุด • {pendingPurchase.totalAmount} บาท</p>
+            <div className="text-center py-12">
+              <Clock size={70} className="mx-auto text-amber-500 mb-6" />
+              <h3 className="font-black text-2xl">รอตรวจสอบสลิป</h3>
+              <p className="text-slate-600 mt-4">เซ็ต {pendingPurchase.numSets} • {pendingPurchase.totalAmount} บาท</p>
             </div>
           ) : activePass ? (
             <div className="text-center">
-              <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">คูปองคงเหลือ</p>
-              <div className="text-[6.5rem] font-black text-slate-900 leading-none mt-2">{activePass.remainingCoupons}</div>
-              <p className="text-slate-400">/ 5 ต่อเซ็ต</p>
-              <button onClick={onScan} className="mt-12 w-full bg-indigo-600 text-white font-black py-6 rounded-2xl text-xl active:scale-95">
-                <QrCode className="inline mr-3" size={28} /> แสกนเพื่อใช้คูปอง
-              </button>
+              <p className="uppercase text-xs font-bold text-slate-400 tracking-widest">คูปองเหลือ</p>
+              <div className="text-[5.5rem] font-black leading-none text-slate-900 mt-2">{activePass.remainingCoupons}</div>
+              <button onClick={onScan} className="mt-12 w-full bg-indigo-600 text-white font-black py-6 rounded-3xl text-xl">แสกนเพื่อใช้คูปอง</button>
             </div>
           ) : (
-            <div className="text-center py-12">
-              <Ticket size={90} className="mx-auto text-slate-200 mb-6" />
-              <h3 className="text-3xl font-black">ยังไม่มีพาส</h3>
-              <button onClick={onBuyPass} className="mt-10 w-full bg-indigo-600 text-white font-black py-7 rounded-2xl text-xl">ซื้อพาสใหม่</button>
-            </div>
+            <button onClick={onBuyPass} className="w-full bg-indigo-600 text-white font-black py-8 rounded-3xl text-2xl">ซื้อพาสใหม่</button>
           )}
         </Card>
       </div>
@@ -456,9 +422,7 @@ function BuyPassView({ settings, onBack, user }: any) {
   };
 
   const handleConfirm = async () => {
-    if (!slip) return alert("กรุณาอัปโหลดสลิป");
-    if (!user) return alert("กรุณาเข้าสู่ระบบ");
-
+    if (!slip || !user) return alert("กรุณาอัปโหลดสลิปและเข้าสู่ระบบ");
     const db = getFirestore();
     await addDoc(collection(db, 'purchases'), {
       studentUid: user.uid,
@@ -468,66 +432,53 @@ function BuyPassView({ settings, onBack, user }: any) {
       status: 'pending',
       createdAt: new Date().toISOString()
     });
-
-    alert(`ส่งสลิปยอด ${totalAmount} บาท เรียบร้อยแล้ว\n\nกรุณารอแอดมินตรวจสอบ`);
+    alert(`ส่งสลิปยอด ${totalAmount} บาท เรียบร้อยแล้ว`);
     onBack();
   };
 
   return (
-    <div className="min-h-screen bg-[#F2F2F7] p-8 font-sans max-w-md mx-auto">
-      <button onClick={onBack} className="flex items-center gap-2 text-slate-500 mb-8"><ChevronLeft size={24} /> กลับ</button>
-
-      <h2 className="text-4xl font-black mb-10">ซื้อพาส</h2>
+    <div className="min-h-screen bg-[#F2F2F7] p-6 md:p-8 max-w-2xl mx-auto w-full font-sans">
+      <button onClick={onBack} className="flex items-center gap-2 mb-6 text-slate-500 font-medium"><ChevronLeft size={24} />กลับ</button>
+      <h2 className="text-4xl font-black mb-8">ซื้อพาส</h2>
 
       <Card className="mb-8">
-        <p className="text-center text-indigo-600 font-bold">ราคา 1 เซ็ต (5 คูปอง) = {settings.pricePerSet} บาท</p>
-        
-        <div className="flex items-center justify-center gap-8 my-10">
-          <button onClick={() => setNumSets(n => Math.max(1, n - 1))} className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-4xl font-black active:scale-95">-</button>
-          <div className="text-7xl font-black w-20 text-center">{numSets}</div>
-          <button onClick={() => setNumSets(n => n + 1)} className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-4xl font-black active:scale-95">+</button>
+        <div className="flex justify-center items-center gap-8 my-8">
+          <button onClick={() => setNumSets(n => Math.max(1, n-1))} className="text-4xl font-black w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center">-</button>
+          <div className="text-7xl font-black">{numSets}</div>
+          <button onClick={() => setNumSets(n => n+1)} className="text-4xl font-black w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center">+</button>
         </div>
-
-        <p className="text-center text-4xl font-black text-slate-900">ยอดที่ต้องชำระ: {totalAmount} บาท</p>
+        <p className="text-center text-4xl font-black">ยอดที่ต้องโอน: <span className="text-indigo-600">{totalAmount}</span> บาท</p>
       </Card>
 
       {settings.promptPayQr && (
-        <Card className="mb-8 p-6">
-          <img src={settings.promptPayQr} className="w-full rounded-2xl" alt="PromptPay QR" />
+        <Card className="mb-8 p-4">
+          <img src={settings.promptPayQr} className="w-full rounded-3xl" alt="QR" />
         </Card>
       )}
 
       <Card>
-        <p className="font-bold text-center mb-6">อัปโหลดสลิป {totalAmount} บาท</p>
-        <label className="border-2 border-dashed border-slate-300 rounded-3xl h-80 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-all">
-          {slip ? (
-            <img src={slip} className="max-h-[280px] rounded-2xl" alt="preview" />
-          ) : (
-            <div className="text-center"><Upload size={70} className="text-slate-300 mx-auto mb-4" /><p className="text-slate-400">แตะเพื่อเลือกรูปสลิป</p></div>
-          )}
+        <label className="border-2 border-dashed border-slate-300 rounded-3xl h-72 md:h-80 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50">
+          {slip ? <img src={slip} className="max-h-full rounded-3xl" alt="slip" /> : <Upload size={80} className="text-slate-300" />}
           <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </label>
       </Card>
 
-      <button 
-        onClick={handleConfirm} 
-        disabled={!slip} 
-        className="w-full mt-10 bg-indigo-600 text-white font-black py-7 rounded-3xl text-xl active:scale-95 disabled:opacity-50"
-      >
-        ส่งสลิปเพื่อตรวจสอบ
+      <button onClick={handleConfirm} disabled={!slip} className="mt-10 w-full bg-indigo-600 text-white font-black py-7 rounded-3xl text-xl active:scale-95 disabled:opacity-50">
+        ส่งสลิปยืนยัน
       </button>
     </div>
   );
 }
 
+/* Merchant, ScanQR, Success ใช้ responsive เดิม */
 function MerchantDashboardView({ user, redemptions, onLogout }: any) {
   return (
-    <div className="min-h-screen bg-orange-50 font-sans pb-20">
-      <Header title="Shop Center" subtitle={`ID: ${user?.uid?.slice(0,8)}`} color="orange" onLogout={onLogout} />
-      <div className="px-6 -mt-12">
+    <div className="min-h-screen bg-orange-50 flex flex-col font-sans max-w-2xl mx-auto w-full pb-12">
+      <Header title="Shop Center" subtitle={`ID: ${user?.uid?.slice(0,8)}`} color="orange" onLogout={onLogout} user={user} />
+      <div className="px-6 -mt-8 flex-1">
         <Card>
-          <p className="text-center text-8xl font-black text-orange-500">{redemptions.length}</p>
-          <p className="text-center text-orange-600 font-bold mt-2">ครั้งที่ใช้สิทธิ์วันนี้</p>
+          <p className="text-7xl font-black text-orange-500 text-center">{redemptions.length}</p>
+          <p className="text-center text-orange-600 font-medium mt-3">ครั้งที่ใช้สิทธิ์วันนี้</p>
         </Card>
       </div>
     </div>
@@ -536,34 +487,23 @@ function MerchantDashboardView({ user, redemptions, onLogout }: any) {
 
 function ScanQRView({ onBack, activePass, user, onSuccess }: any) {
   const [shopId, setShopId] = useState("");
-
   const handleRedeem = async () => {
-    if (!shopId || !activePass || activePass.remainingCoupons <= 0) return alert("ไม่สามารถใช้คูปองได้");
+    if (!shopId || !activePass) return;
     const db = getFirestore();
     await updateDoc(doc(db, 'passes', activePass.id), { remainingCoupons: increment(-1) });
-    await addDoc(collection(db, 'redemptions'), {
-      studentUid: user.uid,
-      merchantId: shopId,
-      amount: 20,
-      redeemedAt: new Date().toISOString()
-    });
+    await addDoc(collection(db, 'redemptions'), { studentUid: user.uid, merchantId: shopId, amount: 20, redeemedAt: new Date().toISOString() });
     onSuccess();
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-10 flex flex-col items-center justify-center">
-      <h2 className="text-3xl font-black mb-12">REDEEM COUPON</h2>
-      <div className="w-full max-w-sm aspect-square border-4 border-indigo-500 rounded-[3rem] flex items-center justify-center bg-black mb-12 relative overflow-hidden">
-        <Camera size={100} className="text-slate-700" />
+    <div className="min-h-screen bg-slate-950 text-white p-6 md:p-10 flex flex-col items-center justify-center max-w-2xl mx-auto w-full">
+      <h2 className="text-3xl font-black mb-10">REDEEM COUPON</h2>
+      <div className="w-full max-w-xs aspect-square border-4 border-indigo-500 rounded-3xl flex items-center justify-center bg-black mb-12">
+        <Camera size={100} className="text-slate-600" />
       </div>
-      <input 
-        type="text" 
-        placeholder="กรอก Shop ID" 
-        value={shopId} 
-        onChange={e => setShopId(e.target.value)}
-        className="w-full bg-slate-900 p-6 rounded-3xl text-center text-2xl font-mono border border-slate-700 outline-none focus:border-indigo-500"
-      />
-      <button onClick={handleRedeem} className="w-full mt-8 bg-indigo-600 py-6 rounded-2xl font-black text-lg active:scale-95">ยืนยันการใช้คูปอง</button>
+      <input type="text" placeholder="กรอก Shop ID" value={shopId} onChange={e => setShopId(e.target.value)}
+        className="w-full bg-slate-900 text-center text-2xl font-mono p-6 rounded-3xl border border-slate-700 outline-none" />
+      <button onClick={handleRedeem} className="mt-10 w-full bg-indigo-600 py-6 rounded-3xl font-black text-lg">ยืนยันการใช้คูปอง</button>
       <button onClick={onBack} className="mt-12 text-slate-400">ยกเลิก</button>
     </div>
   );
@@ -571,11 +511,10 @@ function ScanQRView({ onBack, activePass, user, onSuccess }: any) {
 
 function SuccessView({ onDone }: any) {
   return (
-    <div className="min-h-screen bg-green-500 text-white flex flex-col items-center justify-center p-12 text-center">
-      <CheckCircle size={140} className="mb-10 drop-shadow-2xl" />
-      <h1 className="text-6xl font-black mb-4">สำเร็จ!</h1>
-      <p className="text-2xl mb-16">หักคูปอง 20 บาทเรียบร้อย</p>
-      <button onClick={onDone} className="bg-white text-green-600 px-16 py-7 rounded-3xl font-black text-2xl active:scale-95">กลับหน้าหลัก</button>
+    <div className="min-h-screen bg-green-500 text-white flex flex-col items-center justify-center p-8 text-center max-w-2xl mx-auto w-full">
+      <CheckCircle size={140} className="mb-8" />
+      <h1 className="text-6xl font-black mb-6">สำเร็จ!</h1>
+      <button onClick={onDone} className="bg-white text-green-600 px-14 py-7 rounded-3xl font-black text-2xl">กลับหน้าหลัก</button>
     </div>
   );
 }
