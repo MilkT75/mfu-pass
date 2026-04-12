@@ -6,7 +6,7 @@ import {
   Clock, ChevronLeft, Mail, Lock, UserPlus, LogIn, Users, 
   Upload, CheckCircle, Camera, LogOut, Settings, Save, RefreshCw, 
   Plus, Minus, Eye, EyeOff, Copy, Sparkles, Image as ImageIcon,
-  XCircle, ScanLine, Edit2, MapPin, AlertTriangle, FileText
+  XCircle, ScanLine, Edit2, MapPin, AlertTriangle, MessageSquareWarning, Download, FileText, Info
 } from "lucide-react";
 
 import { initializeApp, getApps, getApp } from "firebase/app";
@@ -17,7 +17,7 @@ import {
 
 import { 
   getFirestore, doc, setDoc, getDoc, collection, addDoc, 
-  onSnapshot, updateDoc, increment, serverTimestamp, query, where, getDocs, orderBy
+  onSnapshot, updateDoc, increment, serverTimestamp, query, where, getDocs
 } from "firebase/firestore";
 
 /* ==================== TYPES ==================== */
@@ -27,6 +27,7 @@ interface UserData {
   displayName?: string;
   role: 'student' | 'merchant' | 'admin' | 'guest';
   isApproved: boolean;
+  isRejected?: boolean;
   storeName?: string;
   location?: string;
 }
@@ -44,6 +45,15 @@ interface PurchaseSlip {
 interface AppSettings {
   pricePerSet: number;
   promptPayQr: string | null;
+}
+
+interface ReportIssue {
+  id: string;
+  studentUid: string;
+  email: string;
+  issue: string;
+  status: 'pending' | 'resolved';
+  createdAt: string;
 }
 
 /* ==================== CONSTANTS ==================== */
@@ -70,8 +80,13 @@ export default function MFUPassApp() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [activePass, setActivePass] = useState<any>(null);
   const [pendingPurchase, setPendingPurchase] = useState<any>(null);
+  
+  // Admin States
   const [allPendingSlips, setAllPendingSlips] = useState<PurchaseSlip[]>([]);
-  const [allPendingMerchants, setAllPendingMerchants] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<UserData[]>([]);
+  const [allPasses, setAllPasses] = useState<any[]>([]);
+  const [allReports, setAllReports] = useState<ReportIssue[]>([]);
+  
   const [redemptions, setRedemptions] = useState<any[]>([]);
   const [systemSettings, setSystemSettings] = useState<AppSettings>({ pricePerSet: 79, promptPayQr: null });
 
@@ -141,11 +156,8 @@ export default function MFUPassApp() {
     }
 
     if (currentView === 'merchant') {
-      // ดึงประวัติการรับคูปองของร้านค้านั้นๆ (Realtime)
       unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
-        // กรองเฉพาะที่ merchantId ตรงกับตัวเอง
         const filtered = snap.docs.filter((d: any) => d.data().merchantId === user.uid).map((d: any) => d.data());
-        // เรียงลำดับจากใหม่ไปเก่า (จำลองการ Sort ฝั่ง Client เพื่อลดปัญหา Index)
         filtered.sort((a, b) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime());
         setRedemptions(filtered);
       }));
@@ -156,8 +168,17 @@ export default function MFUPassApp() {
         setAllPendingSlips(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip)));
       }));
 
+      // ดึงข้อมูล User, Pass และ Reports ทั้งหมดสำหรับหน้า Admin
       unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
-        setAllPendingMerchants(snap.docs.filter((d: any) => d.data().role === 'merchant' && d.data().isApproved === false).map((d: any) => ({ id: d.id, ...d.data() })));
+        setAllUsers(snap.docs.map((d: any) => ({ uid: d.id, ...d.data() } as UserData)));
+      }));
+      unsubs.push(onSnapshot(collection(db, 'passes'), (snap) => {
+        setAllPasses(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
+      }));
+      unsubs.push(onSnapshot(collection(db, 'reports'), (snap) => {
+        const reports = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as ReportIssue));
+        reports.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setAllReports(reports);
       }));
     }
 
@@ -201,7 +222,7 @@ export default function MFUPassApp() {
       email: user.email,
       displayName: user.displayName || user.email.split('@')[0],
       role,
-      isApproved: role !== 'merchant', // ร้านค้าต้องรอแอดมินอนุมัติเสมอ
+      isApproved: role !== 'merchant',
       createdAt: serverTimestamp(),
       ...extraData
     };
@@ -234,13 +255,27 @@ export default function MFUPassApp() {
           <div className={`px-6 py-4 rounded-2xl font-bold text-white shadow-xl flex items-center justify-center gap-2 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'info' ? 'bg-blue-500' : 'bg-green-500'}`}>
             {toast.type === 'error' && <XCircle size={20} />}
             {toast.type === 'success' && <CheckCircle size={20} />}
+            {toast.type === 'info' && <Info size={20} />}
             <span className="text-sm">{toast.message}</span>
           </div>
         </div>
       )}
 
       {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} />}
-      {currentView === 'admin' && <AdminDashboardView allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} user={user} userData={userData} onEditName={handleEditName} />}
+      
+      {currentView === 'admin' && <AdminDashboardView 
+        allPendingSlips={allPendingSlips} 
+        allUsers={allUsers} 
+        allPasses={allPasses}
+        allReports={allReports}
+        systemSettings={systemSettings} 
+        onLogout={handleLogout} 
+        showToast={showToast} 
+        user={user} 
+        userData={userData} 
+        onEditName={handleEditName} 
+      />}
+      
       {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} userData={userData} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} onEditName={handleEditName} />}
       {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
       {currentView === 'buy_pass' && <BuyPassView settings={systemSettings} onBack={() => setCurrentView(userData?.role || 'student')} user={user} showToast={showToast} />}
@@ -259,8 +294,8 @@ function Header({ title, subtitle, color = "indigo", onLogout, user, userData, s
         <Ticket size={180} />
       </div>
       <div className="flex justify-between items-start">
-        <div className="relative z-10">
-          <h2 className="text-3xl md:text-4xl font-black italic tracking-tighter">{title}</h2>
+        <div className="relative z-10 w-full pr-4">
+          <h2 className="text-3xl md:text-4xl font-black italic tracking-tighter truncate">{title}</h2>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-white/90 text-sm font-bold uppercase tracking-widest truncate max-w-[200px]">
               {userData?.displayName || subtitle}
@@ -273,7 +308,7 @@ function Header({ title, subtitle, color = "indigo", onLogout, user, userData, s
           </div>
         </div>
         {onLogout && (
-          <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 px-4 py-3 rounded-2xl transition-all relative z-10 active:scale-95">
+          <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 px-4 py-3 rounded-2xl transition-all relative z-10 active:scale-95 shrink-0">
             <LogOut size={22} />
           </button>
         )}
@@ -286,7 +321,7 @@ function Header({ title, subtitle, color = "indigo", onLogout, user, userData, s
               navigator.clipboard.writeText(user.uid); 
               showToast("คัดลอก UID เรียบร้อย", "success"); 
             }}
-            className="text-white hover:text-white flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 bg-white/10 rounded-lg transition-colors active:scale-95"
+            className="text-white hover:text-white flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 bg-white/10 rounded-lg transition-colors active:scale-95 shrink-0"
           >
             <Copy size={14} /> COPY
           </button>
@@ -350,7 +385,6 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
               <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setIsMerchantSetup(true)} color="orange" />
             </div>
           ) : (
-            // Merchant Registration Policy Form
             <form onSubmit={handleMerchantSubmit} className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <div className="text-center mb-6">
                 <Store size={40} className="text-orange-500 mx-auto mb-4" />
@@ -375,7 +409,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
                 <AlertTriangle className="text-orange-600 shrink-0 mt-1" size={20} />
                 <div className="text-xs text-orange-900 leading-relaxed">
                   <span className="font-bold block mb-1">นโยบายและข้อตกลงทางกฎหมาย</span>
-                  ข้าพเจ้าขอรับรองว่าข้อมูลร้านค้าเป็นความจริง และยินยอมปฏิบัติตามข้อตกลงของ MFU Pass หากพบการทุจริต (เช่น การสแกนคูปองโดยไม่มีการซื้อขายจริง หรือการละทิ้งการให้บริการ) ข้าพเจ้ายินยอมให้ทางระบบระงับบัญชี และอาจถูกดำเนินคดีตามกฎหมาย
+                  ข้าพเจ้าขอรับรองว่าข้อมูลร้านค้าเป็นความจริง และยินยอมปฏิบัติตามข้อตกลงของ MFU Pass หากพบการทุจริต ข้าพเจ้ายินยอมให้ทางระบบระงับบัญชี และอาจถูกดำเนินคดีตามกฎหมาย
                 </div>
               </div>
 
@@ -447,18 +481,24 @@ function RoleButton({ icon, title, onClick, color }: any) {
   );
 }
 
-/* Admin Dashboard - Update Revenue & Show Merchant Details */
-function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettings, onLogout, showToast, user, userData, onEditName }: any) {
+/* ==================== ADMIN DASHBOARD (Full Management) ==================== */
+function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allReports, systemSettings, onLogout, showToast, user, userData, onEditName }: any) {
   const [pricePerSet, setPricePerSet] = useState(systemSettings.pricePerSet || 79);
   const [promptPayQr, setPromptPayQr] = useState(systemSettings.promptPayQr || "");
+  const [adminTab, setAdminTab] = useState<'slips' | 'merchants' | 'users' | 'reports'>('slips');
   const db = getFirestore();
 
   const pendingSlips = allPendingSlips.filter((s: any) => s.status === 'pending');
   const approvedSlips = allPendingSlips.filter((s: any) => s.status === 'approved');
 
-  // ป้องกันค่า NaN ด้วย Number() fallback
   const totalPending = pendingSlips.reduce((sum: number, s: any) => sum + (Number(s.totalAmount) || 0), 0);
   const totalApproved = approvedSlips.reduce((sum: number, s: any) => sum + (Number(s.totalAmount) || 0), 0);
+
+  // Derived Lists
+  const pendingMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && !u.isApproved && !u.isRejected);
+  const approvedMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved);
+  const studentAndGuests = allUsers.filter((u: UserData) => u.role === 'student' || u.role === 'guest');
+  const pendingReports = allReports.filter((r: ReportIssue) => r.status === 'pending');
 
   const saveSettings = async () => {
     await setDoc(doc(db, 'settings', 'global'), { pricePerSet: Number(pricePerSet), promptPayQr }, { merge: true });
@@ -483,8 +523,26 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
     }
   };
 
+  const handleEditCoupons = async (studentUid: string, currentPassId?: string, currentAmount?: number) => {
+    const newAmountStr = prompt(`ระบุจำนวนคูปองใหม่ (ปัจจุบัน: ${currentAmount || 0} ใบ):`, currentAmount ? String(currentAmount) : "0");
+    if (newAmountStr === null) return; // กด Cancel
+    const newAmount = parseInt(newAmountStr);
+    if (isNaN(newAmount) || newAmount < 0) return showToast("กรุณาระบุตัวเลขที่ถูกต้อง", "error");
+
+    try {
+      if (currentPassId) {
+        await updateDoc(doc(db, 'passes', currentPassId), { remainingCoupons: newAmount });
+      } else {
+        await addDoc(collection(db, 'passes'), { studentUid, remainingCoupons: newAmount });
+      }
+      showToast("อัปเดตจำนวนคูปองสำเร็จ", "success");
+    } catch (e) {
+      showToast("เกิดข้อผิดพลาดในการอัปเดตคูปอง", "error");
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white px-4 py-8 md:px-8 font-sans max-w-3xl mx-auto pb-20">
+    <div className="min-h-screen bg-slate-950 text-white px-4 py-8 md:px-8 font-sans max-w-4xl mx-auto pb-20">
       <div className="flex justify-between items-start mb-8">
         <div>
           <h1 className="text-3xl font-black text-indigo-400 italic">Admin Console</h1>
@@ -525,87 +583,261 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
         </div>
       </div>
 
-      <h3 className="uppercase text-xs font-black tracking-widest text-slate-400 mb-4 px-2">สลิปที่รอตรวจสอบ ({pendingSlips.length})</h3>
-      {pendingSlips.map((slip: PurchaseSlip) => (
-        <div key={slip.id} className="bg-slate-900 rounded-[2.5rem] p-6 mb-6 border border-slate-800">
-          <div className="flex justify-between items-center text-xs mb-4 bg-black/40 p-4 rounded-2xl">
-            <span className="font-mono text-slate-400">{slip.studentUid.slice(0,10)}...</span>
-            <span className="font-black text-indigo-400 text-base">เซ็ต {slip.numSets} ({slip.totalAmount}฿)</span>
-          </div>
-          <img src={slip.slipUrl} className="w-full rounded-[2rem] mb-6 aspect-[3/4] object-cover border border-slate-800" alt="slip" />
-          <div className="flex gap-4">
-            <button onClick={() => handleApproveSlip(slip)} className="flex-1 bg-green-600 py-5 rounded-2xl font-black active:scale-95 transition-all">อนุมัติ</button>
-            <button onClick={async () => {
-              await updateDoc(doc(db, 'purchases', slip.id), { status: 'rejected' });
-              showToast("ปฏิเสธรายการ", "info");
-            }} className="flex-1 bg-red-600 py-5 rounded-2xl font-black active:scale-95 transition-all">ปฏิเสธ</button>
-          </div>
-        </div>
-      ))}
+      {/* TABS FOR MANAGEMENT */}
+      <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide">
+        <button onClick={()=>setAdminTab('slips')} className={`px-5 py-3 rounded-xl font-bold text-xs whitespace-nowrap transition-all ${adminTab === 'slips' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>สลิป ({pendingSlips.length})</button>
+        <button onClick={()=>setAdminTab('merchants')} className={`px-5 py-3 rounded-xl font-bold text-xs whitespace-nowrap transition-all ${adminTab === 'merchants' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400'}`}>ร้านค้า ({pendingMerchants.length})</button>
+        <button onClick={()=>setAdminTab('users')} className={`px-5 py-3 rounded-xl font-bold text-xs whitespace-nowrap transition-all ${adminTab === 'users' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>ผู้ใช้งาน ({studentAndGuests.length})</button>
+        <button onClick={()=>setAdminTab('reports')} className={`px-5 py-3 rounded-xl font-bold text-xs whitespace-nowrap transition-all ${adminTab === 'reports' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400'}`}>ปัญหา ({pendingReports.length})</button>
+      </div>
 
-      <h3 className="uppercase text-xs font-black tracking-widest text-slate-400 mb-4 px-2 mt-12">ร้านค้ารออนุมัติ ({allPendingMerchants.length})</h3>
-      {allPendingMerchants.map((m: any) => (
-        <div key={m.id} className="bg-slate-900 rounded-[2.5rem] p-6 mb-4 border border-slate-800">
-          <div className="mb-4">
-            <p className="font-bold text-orange-400 text-lg">{m.storeName || 'ไม่ได้ระบุชื่อ'}</p>
-            <p className="text-sm text-slate-300 mt-1 flex items-center gap-1"><MapPin size={14}/> {m.location || 'ไม่ได้ระบุสถานที่'}</p>
-            <p className="text-xs text-slate-500 mt-2">Email: {m.email}</p>
-          </div>
-          <div className="bg-green-500/10 text-green-400 p-3 rounded-xl text-xs font-bold mb-4 flex items-center gap-2">
-            <CheckCircle size={14}/> ยอมรับเงื่อนไขและข้อตกลงแล้ว
-          </div>
-          <button onClick={async () => { 
-            await updateDoc(doc(db, 'users', m.id), { isApproved: true }); 
-            showToast("อนุมัติร้านค้าเรียบร้อย", "success");
-          }} className="w-full bg-green-600 py-4 rounded-2xl font-bold text-sm uppercase active:scale-95">อนุมัติ Partner</button>
+      {/* TAB CONTENT */}
+      {adminTab === 'slips' && (
+        <div className="animate-in fade-in">
+          {pendingSlips.length === 0 ? <p className="text-slate-600 italic px-2 mb-10 text-center">ไม่มีรายการใหม่</p> : pendingSlips.map((slip: PurchaseSlip) => (
+            <div key={slip.id} className="bg-slate-900 rounded-[2.5rem] p-6 mb-6 border border-slate-800">
+              <div className="flex justify-between items-center text-xs mb-4 bg-black/40 p-4 rounded-2xl">
+                <span className="font-mono text-slate-400">{slip.studentUid.slice(0,10)}...</span>
+                <span className="font-black text-indigo-400 text-base">เซ็ต {slip.numSets} ({slip.totalAmount}฿)</span>
+              </div>
+              <img src={slip.slipUrl} className="w-full rounded-[2rem] mb-6 aspect-[3/4] object-cover border border-slate-800" alt="slip" />
+              <div className="flex gap-4">
+                <button onClick={() => handleApproveSlip(slip)} className="flex-1 bg-green-600 py-5 rounded-2xl font-black active:scale-95 transition-all">อนุมัติ</button>
+                <button onClick={async () => {
+                  await updateDoc(doc(db, 'purchases', slip.id), { status: 'rejected' });
+                  showToast("ปฏิเสธรายการ", "info");
+                }} className="flex-1 bg-red-600 py-5 rounded-2xl font-black active:scale-95 transition-all">ปฏิเสธ</button>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {adminTab === 'merchants' && (
+        <div className="animate-in fade-in">
+          <h3 className="text-orange-400 font-bold text-sm mb-4">คำขอเปิดร้านค้าใหม่</h3>
+          {pendingMerchants.length === 0 ? <p className="text-slate-600 italic mb-8">ไม่มีร้านค้าใหม่</p> : pendingMerchants.map((m: any) => (
+            <div key={m.uid} className="bg-slate-900 rounded-[2.5rem] p-6 mb-4 border border-slate-800">
+              <div className="mb-4">
+                <p className="font-bold text-orange-400 text-lg">{m.storeName || 'ไม่ได้ระบุชื่อร้าน'}</p>
+                <p className="text-sm text-slate-300 mt-1 flex items-center gap-1"><MapPin size={14}/> {m.location || 'ไม่ได้ระบุสถานที่'}</p>
+                <p className="text-xs text-slate-500 mt-2">Owner: {m.displayName || m.email}</p>
+              </div>
+              <div className="bg-green-500/10 text-green-400 p-3 rounded-xl text-xs font-bold mb-4 flex items-center gap-2"><CheckCircle size={14}/> ยอมรับเงื่อนไขแล้ว</div>
+              <div className="flex gap-3">
+                <button onClick={async () => { 
+                  await updateDoc(doc(db, 'users', m.uid), { isApproved: true }); 
+                  showToast("อนุมัติร้านค้าเรียบร้อย", "success");
+                }} className="flex-1 bg-green-600 py-4 rounded-2xl font-bold text-sm uppercase active:scale-95">อนุมัติ</button>
+                
+                {/* ปุ่มไม่อนุมัติร้านค้า */}
+                <button onClick={async () => { 
+                  await updateDoc(doc(db, 'users', m.uid), { isRejected: true }); 
+                  showToast("ปฏิเสธร้านค้านี้แล้ว", "info");
+                }} className="bg-red-600/20 text-red-500 px-6 py-4 rounded-2xl font-bold text-sm uppercase active:scale-95">ไม่อนุมัติ</button>
+              </div>
+            </div>
+          ))}
+
+          <h3 className="text-orange-400 font-bold text-sm mb-4 mt-8 border-t border-slate-800 pt-8">ร้านค้าที่อนุมัติแล้ว</h3>
+          {approvedMerchants.map((m: any) => (
+             <div key={m.uid} className="bg-slate-900 rounded-3xl p-5 mb-3 border border-slate-800 flex justify-between items-center">
+               <div>
+                 <p className="font-bold text-white text-sm">{m.storeName}</p>
+                 <p className="text-xs text-slate-500 font-mono">{m.uid.slice(0,8)}...</p>
+               </div>
+               <span className="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-[10px] font-bold">Active</span>
+             </div>
+          ))}
+        </div>
+      )}
+
+      {adminTab === 'users' && (
+        <div className="animate-in fade-in space-y-3">
+          <p className="text-slate-400 text-xs mb-4">ระบบสามารถแก้ไขจำนวนคูปองของแต่ละคนได้</p>
+          {studentAndGuests.map((u: any) => {
+            const pass = allPasses.find((p: any) => p.studentUid === u.uid);
+            return (
+              <div key={u.uid} className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center">
+                <div className="truncate pr-4">
+                  <p className="font-bold text-sm text-blue-100 truncate">{u.displayName || u.email}</p>
+                  <p className="text-[10px] text-slate-500 mt-1 uppercase">{u.role}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-center">
+                    <p className="text-[10px] text-slate-500 mb-1">คูปอง</p>
+                    <p className="font-black text-xl text-indigo-400">{pass?.remainingCoupons || 0}</p>
+                  </div>
+                  <button onClick={() => handleEditCoupons(u.uid, pass?.id, pass?.remainingCoupons)} className="bg-white/10 p-2.5 rounded-xl hover:bg-white/20 active:scale-90 transition-all text-indigo-300">
+                    <Edit2 size={16} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {adminTab === 'reports' && (
+        <div className="animate-in fade-in">
+           {pendingReports.length === 0 ? <p className="text-slate-600 italic text-center py-10">ไม่มีปัญหาที่ค้างอยู่</p> : pendingReports.map((r: ReportIssue) => (
+             <div key={r.id} className="bg-red-500/10 border border-red-500/20 p-6 rounded-[2.5rem] mb-4">
+               <div className="flex items-center gap-2 text-red-400 font-bold text-sm mb-3">
+                 <MessageSquareWarning size={18} /> ปัญหาจากผู้ใช้งาน
+               </div>
+               <p className="text-slate-200 text-sm leading-relaxed mb-4 p-4 bg-black/40 rounded-2xl">"{r.issue}"</p>
+               <p className="text-[10px] text-slate-500 mb-6 font-mono">From: {r.email} ({r.studentUid.slice(0,8)}...)</p>
+               <button onClick={async () => {
+                 await updateDoc(doc(db, 'reports', r.id), { status: 'resolved' });
+                 showToast("ทำเครื่องหมายว่าแก้ไขแล้ว", "success");
+               }} className="w-full bg-green-600 py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95">
+                 <CheckCircle size={18} /> แก้ไขแล้ว
+               </button>
+             </div>
+           ))}
+        </div>
+      )}
     </div>
   );
 }
 
+/* ==================== STUDENT & MERCHANT DASHBOARDS ==================== */
+
 function StudentDashboardView({ user, userData, activePass, pendingPurchase, onLogout, onBuyPass, onScan, showToast, onEditName }: any) {
   const roleName = userData?.role === 'guest' ? 'Guest' : 'Student';
+  
+  const handleReport = async () => {
+    const issue = prompt("กรุณาระบุปัญหาที่พบ หรือข้อเสนอแนะ:");
+    if(issue && issue.trim() !== "") {
+      try {
+        await addDoc(collection(getFirestore(), 'reports'), {
+          studentUid: user.uid,
+          email: user.email,
+          issue: issue.trim(),
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+        showToast("ส่งรายงานให้ผู้ดูแลระบบแล้วครับ", "success");
+      } catch (e) {
+        showToast("ไม่สามารถส่งรายงานได้", "error");
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-12 max-w-2xl mx-auto w-full">
       <Header title="My Wallet" subtitle={roleName} user={user} userData={userData} onLogout={onLogout} showToast={showToast} onEditName={onEditName} />
-      <div className="px-6 flex-1 space-y-8 animate-in slide-in-from-bottom-8 duration-500">
-        <Card className="p-10 border-indigo-50 shadow-indigo-100/50">
-          {pendingPurchase ? (
-            <div className="text-center py-12">
-              <Clock size={60} className="mx-auto text-amber-500 mb-6 animate-pulse" />
-              <h3 className="font-black text-2xl text-slate-800 mb-2">รอตรวจสอบสลิป</h3>
-              <p className="text-slate-500 text-sm">จำนวน {pendingPurchase.numSets} เซ็ต • ยอด {pendingPurchase.totalAmount} บาท</p>
-            </div>
-          ) : activePass && activePass.remainingCoupons > 0 ? (
-            <div className="text-center">
-              <div className="flex justify-between w-full mb-6">
+      <div className="px-4 md:px-6 flex-1 space-y-6 animate-in slide-in-from-bottom-8 duration-500">
+        
+        {pendingPurchase && (
+          <div className="bg-amber-100 rounded-[2rem] p-6 text-center border border-amber-200 shadow-sm animate-pulse">
+             <Clock className="mx-auto text-amber-500 mb-2" size={32} />
+             <h3 className="font-black text-amber-800">รอตรวจสอบสลิป ({pendingPurchase.numSets} เซ็ต)</h3>
+             <p className="text-amber-700/70 text-xs mt-1 font-bold">แอดมินกำลังดำเนินการ โปรดรอสักครู่...</p>
+          </div>
+        )}
+
+        <Card className="text-center flex flex-col items-center">
+          {activePass && activePass.remainingCoupons > 0 ? (
+            <div className="w-full">
+              <div className="flex justify-between items-center w-full mb-6">
                 <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Wallet size={24}/></div>
-                <div className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div> Active</div>
+                <div className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1"><div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></div> Active</div>
               </div>
-              <p className="uppercase text-[10px] font-black text-slate-400 tracking-[0.2em] mb-2">คูปองคงเหลือ</p>
-              <div className="text-[7rem] font-black leading-none text-slate-900 tracking-tighter mb-2">{activePass.remainingCoupons}</div>
-              <div className="inline-flex bg-green-50 text-green-600 font-black py-2 px-6 rounded-full mb-10 items-center gap-2 border border-green-100">
+              <p className="uppercase text-xs font-black text-slate-400 tracking-[0.2em] mb-2">คูปองคงเหลือ</p>
+              <div className="text-[7rem] font-black leading-none text-slate-900 tracking-tighter">{activePass.remainingCoupons}</div>
+              
+              <div className="bg-indigo-50 text-indigo-700 py-2 px-6 rounded-full inline-flex items-center gap-2 mt-4 mb-10 font-black border border-indigo-100 shadow-sm">
                 <Sparkles size={16}/> มูลค่ารวม {activePass.remainingCoupons * 20} ฿
               </div>
+              
               <div className="flex gap-3 w-full">
-                <button onClick={onScan} className="flex-1 bg-indigo-600 text-white font-black py-5 rounded-[1.5rem] text-lg active:scale-95 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-3">
-                  <QrCode size={20}/> แสกนจ่าย
+                <button onClick={onScan} className="flex-1 bg-indigo-600 text-white font-black py-5 rounded-[1.5rem] text-lg active:scale-95 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2">
+                  <QrCode size={20}/> แสกนใช้
                 </button>
-                <button onClick={onBuyPass} className="flex-none bg-slate-100 text-indigo-600 font-black px-6 rounded-[1.5rem] active:scale-95 transition-all hover:bg-slate-200 text-sm uppercase tracking-widest">
+                <button onClick={onBuyPass} className="flex-none bg-slate-100 text-indigo-600 font-black px-6 rounded-[1.5rem] active:scale-95 transition-all hover:bg-slate-200 shadow-sm">
                   + ซื้อเพิ่ม
                 </button>
               </div>
             </div>
           ) : (
-            <div className="text-center py-6">
+            <div className="py-6">
               <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><Ticket size={40} className="text-slate-300"/></div>
               <h3 className="font-black text-2xl text-slate-800 mb-2">กระเป๋าว่างเปล่า</h3>
-              <p className="text-slate-500 text-sm mb-8 px-4">ซื้อพาสใหม่เพื่อรับคูปองส่วนลด 5 ใบ สำหรับใช้ที่โรงอาหาร</p>
-              <button onClick={onBuyPass} className="w-full bg-indigo-600 text-white font-black py-6 rounded-[2rem] text-xl active:scale-95 shadow-xl shadow-indigo-200 transition-all">ซื้อพาสใหม่</button>
+              <p className="text-slate-500 text-sm mb-8 px-4 leading-relaxed">ซื้อพาสใหม่เพื่อรับคูปองส่วนลด 5 ใบ (มูลค่า 100 บาท) ในราคาพิเศษ</p>
+              <button onClick={onBuyPass} className="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl text-lg active:scale-95 shadow-xl shadow-indigo-100">ซื้อพาสใหม่</button>
             </div>
           )}
         </Card>
+
+        {/* ปุ่มรายงานปัญหา */}
+        <button onClick={handleReport} className="w-full bg-white border border-red-100 text-red-500 font-bold py-5 rounded-3xl flex justify-center items-center gap-2 hover:bg-red-50 active:scale-95 transition-all shadow-sm">
+           <AlertTriangle size={18} /> รายงานปัญหาการใช้งาน
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MerchantDashboardView({ user, userData, redemptions, onLogout, showToast, onEditName }: any) {
+  // สร้าง URL ของ QR Code จาก ID ของร้านค้า
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${user?.uid}&margin=10`;
+
+  const downloadQR = async () => {
+    try {
+      const response = await fetch(qrCodeUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `MFUPass_StoreQR_${userData?.storeName || 'Shop'}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast("ดาวน์โหลด QR Code แล้ว", "success");
+    } catch (e) {
+      // Fallback ถ้า fetch ติด CORS บนมือถือบางรุ่น ให้เปิดภาพแทน
+      window.open(qrCodeUrl, "_blank");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-orange-50 flex flex-col font-sans max-w-2xl mx-auto w-full pb-12">
+      <Header title="Shop Center" subtitle={userData?.storeName || "Shop Console"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
+      <div className="px-4 md:px-6 flex-1 max-w-2xl mx-auto w-full -mt-8 animate-in slide-in-from-bottom-8 duration-700">
+        {!userData?.isApproved ? (
+           <Card className="text-center py-16 border-4 border-dashed border-orange-200">
+             <Clock className="mx-auto text-orange-400 mb-6 animate-pulse" size={64}/>
+             <h3 className="text-2xl font-black text-slate-800 mb-2">รอการอนุมัติ</h3>
+             <p className="text-slate-500 text-sm px-4 leading-relaxed">แอดมินกำลังตรวจสอบร้านค้าของคุณ หากถูกปฏิเสธบัญชีจะถูกลบออกจากระบบครับ</p>
+           </Card>
+        ) : (
+          <>
+            <Card className="text-center p-10 shadow-orange-100/50 mb-6 border-none">
+              <p className="text-slate-400 font-black text-xs uppercase mb-3 tracking-widest">รับคูปองแล้ววันนี้</p>
+              <div className="text-[8rem] font-black leading-none text-orange-500 mb-8">{redemptions.length}</div>
+              <div className="bg-orange-50 py-5 rounded-3xl border border-orange-100 shadow-inner">
+                <p className="text-orange-400 text-[10px] font-black uppercase mb-1 tracking-widest">ยอดเงินที่ระบบต้องจ่าย</p>
+                <p className="text-4xl font-black text-orange-600">{redemptions.length * 20} <span className="text-xl">฿</span></p>
+              </div>
+            </Card>
+
+            {/* ส่วนของ QR Code หน้าร้าน */}
+            <div className="bg-white rounded-[2.5rem] p-8 border-2 border-dashed border-orange-200 shadow-sm flex flex-col items-center justify-center text-center mb-8">
+               <p className="text-slate-700 font-black text-lg mb-2">QR Code สำหรับรับสิทธิ์</p>
+               <p className="text-slate-400 text-xs mb-6">ให้นักศึกษาสแกน QR นี้เพื่อจ่ายคูปองให้ร้านค้า</p>
+               
+               <div className="bg-white p-4 rounded-3xl shadow-xl border border-slate-100 mb-6">
+                 <img src={qrCodeUrl} className="w-48 h-48 object-contain rounded-xl" alt="Store QR" />
+               </div>
+               
+               <button onClick={downloadQR} className="bg-orange-100 text-orange-600 font-bold py-3 px-8 rounded-full flex items-center gap-2 hover:bg-orange-200 active:scale-95 transition-all text-sm shadow-sm">
+                 <Download size={18} /> ดาวน์โหลดภาพ QR Code
+               </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -615,7 +847,7 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
   const [numSets, setNumSets] = useState(1);
   const [slip, setSlip] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const totalAmount = Number(settings.pricePerSet) * numSets;
+  const totalAmount = Number(settings?.pricePerSet || 79) * numSets;
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -630,31 +862,36 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
   const handleConfirm = async () => {
     if (!slip || !user) return showToast("กรุณาอัปโหลดสลิปยืนยัน", "error");
     setIsLoading(true);
-    const db = getFirestore();
-    await addDoc(collection(db, 'purchases'), {
-      studentUid: user.uid,
-      numSets,
-      totalAmount, // Ensure it's a number for admin calculation
-      slipUrl: slip,
-      status: 'pending',
-      createdAt: new Date().toISOString()
-    });
-    showToast(`ส่งสลิปยอด ${totalAmount} บาท เรียบร้อยแล้ว`, "success");
-    setIsLoading(false);
-    onBack();
+    try {
+      const db = getFirestore();
+      await addDoc(collection(db, 'purchases'), {
+        studentUid: user.uid,
+        numSets,
+        totalAmount,
+        slipUrl: slip,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      });
+      showToast(`ส่งสลิปยอด ${totalAmount} บาท เรียบร้อยแล้ว`, "success");
+      onBack();
+    } catch (e) {
+      showToast("เกิดข้อผิดพลาดในการส่งข้อมูล", "error");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#F2F2F7] p-6 md:p-8 max-w-2xl mx-auto w-full font-sans pb-10">
-      <button onClick={onBack} className="flex items-center gap-2 mb-8 text-slate-500 font-bold text-xs uppercase tracking-widest active:scale-90"><ChevronLeft size={20} /> กลับ</button>
+      <button onClick={onBack} className="flex items-center gap-2 mb-8 text-slate-500 font-bold text-xs uppercase tracking-widest active:scale-90 transition-all"><ChevronLeft size={20} /> กลับ</button>
       <h2 className="text-4xl font-black mb-8 italic tracking-tighter">Buy Pass</h2>
 
       <Card className="mb-6 p-8 text-center animate-in zoom-in border-indigo-100 border-2">
         <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-6">เลือกจำนวนเซ็ต (1 เซ็ต = 5 คูปอง)</p>
         <div className="flex justify-center items-center gap-8 mb-8 bg-slate-50 py-4 rounded-[2rem]">
-          <button onClick={() => setNumSets((n: number) => Math.max(1, n-1))} className="text-3xl font-black w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-90"><Minus size={24}/></button>
+          <button onClick={() => setNumSets((n: number) => Math.max(1, n-1))} className="text-3xl font-black w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-90 transition-all"><Minus size={24}/></button>
           <div className="text-6xl font-black text-slate-800 w-16">{numSets}</div>
-          <button onClick={() => setNumSets((n: number) => n+1)} className="text-3xl font-black w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-90"><Plus size={24}/></button>
+          <button onClick={() => setNumSets((n: number) => n+1)} className="text-3xl font-black w-14 h-14 bg-white shadow-sm rounded-full flex items-center justify-center text-slate-500 hover:text-indigo-600 active:scale-90 transition-all"><Plus size={24}/></button>
         </div>
         <div className="bg-indigo-50 py-4 rounded-[1.5rem]">
           <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">ยอดโอนทั้งหมด</p>
@@ -662,7 +899,7 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
         </div>
       </Card>
 
-      {settings.promptPayQr && (
+      {settings?.promptPayQr && (
         <Card className="mb-6 p-8 text-center shadow-sm">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">สแกนเพื่อโอนเงิน</p>
           <img src={settings.promptPayQr} className="w-full max-w-[200px] mx-auto rounded-3xl" alt="QR" />
@@ -683,59 +920,6 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
       <button onClick={handleConfirm} disabled={!slip || isLoading} className="mt-10 w-full bg-indigo-600 text-white font-black py-7 rounded-[2rem] text-xl active:scale-95 disabled:opacity-50 shadow-xl shadow-indigo-200 transition-all flex items-center justify-center">
         {isLoading ? <Loader2 className="animate-spin" /> : "ส่งสลิปยืนยัน"}
       </button>
-    </div>
-  );
-}
-
-function MerchantDashboardView({ user, userData, redemptions, onLogout, showToast, onEditName }: any) {
-  return (
-    <div className="min-h-screen bg-orange-50 flex flex-col font-sans max-w-2xl mx-auto w-full pb-12">
-      <Header title="Shop Center" subtitle={userData?.storeName || "Shop Console"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
-      <div className="px-6 -mt-8 flex-1 animate-in slide-in-from-bottom-8 duration-700">
-        {!userData?.isApproved ? (
-          <Card className="text-center py-16 border-4 border-dashed border-orange-200 shadow-orange-100">
-             <Clock className="mx-auto text-orange-400 mb-6 animate-pulse" size={64}/>
-             <h3 className="text-2xl font-black text-slate-800 mb-2">รออนุมัติเปิดร้าน</h3>
-             <p className="text-slate-500 text-sm">แอดมินกำลังตรวจสอบข้อมูลร้านค้าของคุณ</p>
-          </Card>
-        ) : (
-          <>
-            <Card className="text-center p-12 border-none shadow-orange-100/60 relative overflow-hidden mb-6">
-              <div className="absolute -top-10 -left-10 w-40 h-40 bg-orange-100 rounded-full blur-3xl opacity-50"></div>
-              <p className="text-slate-400 font-black text-xs uppercase mb-4 tracking-widest relative z-10">รับคูปองแล้ววันนี้</p>
-              <div className="text-[8rem] font-black leading-none text-orange-500 mb-8 relative z-10">{redemptions.length}</div>
-              <div className="bg-orange-600 py-6 rounded-[2.5rem] shadow-xl text-white relative z-10">
-                <p className="text-orange-200 text-[10px] font-black uppercase mb-1 tracking-widest">ยอดเงินที่ระบบต้องจ่าย</p>
-                <p className="text-5xl font-black">{redemptions.length * 20} <span className="text-2xl">฿</span></p>
-              </div>
-            </Card>
-
-            {/* แสดงประวัติการทำรายการล่าสุด */}
-            <div className="mb-8">
-              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">ประวัติการทำรายการล่าสุด</h3>
-              {redemptions.length === 0 ? (
-                <p className="text-slate-400 text-sm italic text-center py-4 bg-white rounded-2xl border border-slate-100">ยังไม่มีรายการวันนี้</p>
-              ) : (
-                <div className="space-y-3">
-                  {redemptions.slice(0, 5).map((r: any, idx: number) => (
-                    <div key={idx} className="bg-white p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-green-100 p-2 rounded-full text-green-600"><Ticket size={16}/></div>
-                        <div>
-                          <p className="text-sm font-bold text-slate-700">ได้รับคูปอง</p>
-                          <p className="text-[10px] text-slate-400">{new Date(r.redeemedAt).toLocaleTimeString('th-TH')}</p>
-                        </div>
-                      </div>
-                      <p className="font-black text-green-600">+20 ฿</p>
-                    </div>
-                  ))}
-                  {redemptions.length > 5 && <p className="text-center text-xs text-slate-400 mt-4">มีรายการอีก {redemptions.length - 5} รายการ</p>}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -765,7 +949,7 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
         
         if (!isScanning) return; 
 
-        // หน่วงเวลาให้ DOM <div id="qr-reader"> พร้อมแน่นอนบนมือถือ
+        // หน่วงเวลาให้ DOM #qr-reader พร้อมแน่นอนบนมือถือ
         setTimeout(() => {
           try {
             scanner = new (window as any).Html5QrcodeScanner(
@@ -825,15 +1009,18 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
     <div className="min-h-screen bg-slate-950 text-white p-6 md:p-10 flex flex-col items-center justify-center max-w-2xl mx-auto w-full font-sans">
       <h2 className="text-3xl font-black mb-10 italic text-indigo-400">REDEEM COUPON</h2>
       
+      {/* แก้ปัญหา UI กล้องมือถือ (Issue: Mobile UI Overflow / Black Screen)
+        - ปรับ #qr-reader ให้เป็น relative/absolute อย่างถูกต้อง 
+      */}
       <div className={`w-full max-w-sm aspect-square border-4 border-indigo-500 rounded-[3rem] flex flex-col items-center justify-center bg-black mb-8 relative overflow-hidden transition-all ${isScanning ? 'shadow-[0_0_50px_rgba(99,102,241,0.4)]' : ''}`}>
         {isScanning ? (
-          <div id="qr-reader" className="w-full h-full bg-white flex flex-col items-center justify-center"></div>
+          <div id="qr-reader" className="w-full h-full bg-black flex flex-col items-center justify-center absolute inset-0"></div>
         ) : (
           <>
             <Camera size={80} className="text-slate-600 mb-6" />
             <button 
               onClick={() => setIsScanning(true)} 
-              className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 px-6 py-3 rounded-full font-bold text-sm flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all active:scale-95"
+              className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 px-6 py-3 rounded-full font-bold text-sm flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all active:scale-95 shadow-lg"
             >
               <ScanLine size={18} /> เปิดกล้องสแกน QR
             </button>
@@ -842,8 +1029,8 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
       </div>
 
       {isScanning && (
-        <button onClick={() => setIsScanning(false)} className="mb-6 bg-red-600/20 text-red-400 border border-red-500/50 px-6 py-2 rounded-full font-bold text-xs uppercase tracking-widest active:scale-95">
-          ปิดกล้อง
+        <button onClick={() => setIsScanning(false)} className="mb-6 bg-slate-800 border border-slate-700 px-6 py-2.5 rounded-full font-bold text-xs uppercase tracking-widest active:scale-95 text-slate-300 shadow-sm">
+          ปิดกล้องยกเลิกสแกน
         </button>
       )}
 
@@ -858,19 +1045,28 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
 
       <button onClick={onBack} className="mt-10 text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors">ยกเลิก</button>
       
+      {/* Custom CSS สำหรับบังคับให้ html5-qrcode แสดงผลพอดีกับมือถือและสวยงาม 
+      */}
       <style>{`
-        #qr-reader { border: none !important; width: 100% !important; border-radius: 2.5rem; }
-        #qr-reader__scan_region { min-height: 100% !important; background: black; display: flex; align-items: center; justify-content: center;}
-        #qr-reader__dashboard_section_csr span { color: #4f46e5 !important; font-family: sans-serif; font-size: 12px; font-weight: bold;}
-        #qr-reader__dashboard_section_swaplink { color: #818cf8 !important; text-decoration: none; margin-top: 10px; display: inline-block; font-weight: bold; font-family: sans-serif;}
-        #qr-reader button { background: #4f46e5 !important; border: none; color: white; padding: 10px 20px; border-radius: 12px; font-weight: bold; cursor: pointer; font-family: sans-serif; margin-top: 10px; }
-        #qr-reader__camera_selection { background: #1e293b; color: white; border: 1px solid #334155; padding: 10px; border-radius: 12px; margin-bottom: 10px; width: 90%; outline: none; }
+        #qr-reader { border: none !important; width: 100% !important; border-radius: 2rem; overflow: hidden; background: #000; }
+        #qr-reader video { object-fit: cover !important; border-radius: 2rem !important; width: 100% !important; height: 100% !important; }
+        #qr-reader__scan_region { background: black; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: unset !important; }
+        #qr-reader__dashboard_section_csr span { color: transparent !important; display: none; }
+        #qr-reader__dashboard_section_swaplink { display: none !important; }
+        #qr-reader button { background: #4f46e5 !important; color: white !important; padding: 12px 24px !important; border-radius: 1rem !important; font-weight: bold; cursor: pointer; font-family: sans-serif; border: none !important; margin: 10px auto !important; display: block; max-width: 80%; }
+        #qr-reader__camera_selection { background: #1e293b; color: white; border: 1px solid #334155; padding: 10px; border-radius: 12px; margin-bottom: 10px; width: 90%; max-width: 300px; outline: none; }
       `}</style>
     </div>
   );
 }
 
 function SuccessView({ onDone }: any) {
+  const [time, setTime] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#10b981] text-white flex flex-col items-center justify-center p-8 text-center max-w-2xl mx-auto w-full animate-in fade-in duration-500">
       <div className="bg-white text-green-500 p-8 rounded-full mb-8 shadow-2xl animate-bounce border-8 border-green-400/30">
@@ -880,6 +1076,9 @@ function SuccessView({ onDone }: any) {
       <div className="bg-black/10 p-8 rounded-[3rem] backdrop-blur-md mb-12 w-full border border-white/20">
          <p className="text-xs uppercase font-bold tracking-widest mb-2 opacity-80">ระบบหักคูปองแล้ว</p>
          <p className="text-7xl font-black">20<span className="text-4xl opacity-50 ml-2">฿</span></p>
+      </div>
+      <div className="text-7xl font-mono font-black tracking-tighter mb-24 opacity-90 animate-pulse drop-shadow-lg">
+        {time.toLocaleTimeString('en-US', { hour12: false })}
       </div>
       <button onClick={onDone} className="bg-white text-green-600 w-full py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-95 transition-all uppercase tracking-widest">
         กลับหน้าหลัก
