@@ -31,7 +31,6 @@ interface UserData {
   role: 'student' | 'merchant' | 'admin' | 'guest';
   isApproved: boolean;
   isRejected?: boolean;
-  // Merchant specifics
   storeName?: string;
   location?: string;
   category?: string;
@@ -45,7 +44,7 @@ interface UserData {
 interface PurchaseSlip {
   id: string;
   studentUid: string;
-  merchantId: string; // Feature 1: Store-Specific
+  merchantId: string;
   numSets: number;
   totalAmount: number;
   slipUrl: string;
@@ -105,9 +104,35 @@ const getFirebaseConfig = () => ({
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID?.trim() || "",
 });
 
-/* ==================== NOTIFICATION SYSTEM (PLACEHOLDER) ==================== */
+/* ==================== NOTIFICATION SYSTEM ==================== */
 const sendMerchantNotification = (merchantId: string, message: string) => {
   console.log(`Mock Notification to Merchant [${merchantId}]:`, message);
+};
+
+/* ==================== IMAGE COMPRESSOR ==================== */
+// ป้องกันปัญหาการอัปโหลดไฟล์ภาพขนาดใหญ่เกินลิมิต 1MB ของ Firestore
+const compressImage = (file: File, callback: (base64: string) => void) => {
+  const reader = new FileReader();
+  reader.onload = (e: any) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_WIDTH = 600;
+      let width = img.width;
+      let height = img.height;
+      if (width > MAX_WIDTH) {
+        height = Math.round((height * MAX_WIDTH) / width);
+        width = MAX_WIDTH;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      callback(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 };
 
 /* ==================== MAIN APP ==================== */
@@ -115,7 +140,6 @@ export default function MFUPassApp() {
   const [user, setUser] = useState<any>(null);
   const [isAppReady, setIsAppReady] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
-  // Update authMode to handle merchant_setup state explicitly
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'role_setup' | 'merchant_setup' | 'forgot_password'>('login');
   const [currentView, setCurrentView] = useState<string>('auth');
 
@@ -163,7 +187,6 @@ export default function MFUPassApp() {
             setUserData(data);
             setCurrentView(data.role);
           } else {
-            // New user without a role doc
             setAuthMode('role_setup');
             setCurrentView('auth');
           }
@@ -275,10 +298,10 @@ export default function MFUPassApp() {
     try {
       const auth = getAuth();
       const provider = new GoogleAuthProvider();
-      // Simply authenticate here. Role will be checked/assigned in handleRoleSelect.
       await signInWithPopup(auth, provider);
     } catch (e: any) {
-      showToast("เกิดข้อผิดพลาดในการล็อกอินด้วย Google", "error");
+      // โชว์ Error เต็มๆ เพื่อให้รู้ว่าติดปัญหาเรื่อง Domain หรือเปล่า
+      showToast(e.message || "เกิดข้อผิดพลาดในการล็อกอินด้วย Google", "error");
     } finally {
       setIsActionLoading(false);
     }
@@ -301,28 +324,35 @@ export default function MFUPassApp() {
   };
 
   const handleRoleSelect = async (role: string, extraData: any = {}) => {
-    if (!user) return;
+    if (!user) {
+       showToast("ไม่พบข้อมูลผู้ใช้ กรุณาเข้าสู่ระบบใหม่", "error");
+       return;
+    }
 
-    // Feature 8: Google SSO Domain Restriction for Students
     if (role === 'student' && !user.email?.endsWith('@lamduan.mfu.ac.th')) {
       showToast("เฉพาะอีเมล @lamduan.mfu.ac.th สำหรับนักศึกษาเท่านั้น", "error");
       return;
     }
 
     setIsActionLoading(true);
-    const db = getFirestore();
-    const data = {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName || user.email.split('@')[0],
-      role,
-      isApproved: role !== 'merchant',
-      createdAt: serverTimestamp(),
-      ...extraData
-    };
-    await setDoc(doc(db, 'users', user.uid), data, { merge: true });
-    setCurrentView(role);
-    setIsActionLoading(false);
+    try {
+      const db = getFirestore();
+      const data = {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.email.split('@')[0],
+        role,
+        isApproved: role !== 'merchant',
+        createdAt: serverTimestamp(),
+        ...extraData
+      };
+      await setDoc(doc(db, 'users', user.uid), data, { merge: true });
+      setCurrentView(role);
+    } catch (error: any) {
+      showToast(error.message || "เกิดข้อผิดพลาดในการบันทึกข้อมูล", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
   };
 
   const handleEditName = async () => {
@@ -347,19 +377,19 @@ export default function MFUPassApp() {
     <div className="relative bg-[#F9FAFB] min-h-screen font-sans text-slate-800">
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-6 fade-in w-max">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-6 fade-in w-max max-w-[90%]">
           <div className={`px-5 py-3 rounded-full font-bold text-white shadow-lg flex items-center justify-center gap-2 text-sm
             ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'info' ? 'bg-blue-500' : 'bg-slate-900'}`}>
-            {toast.type === 'error' && <XCircle size={16} />}
-            {toast.type === 'success' && <CheckCircle size={16} />}
-            {toast.type === 'info' && <Info size={16} />}
-            <span>{toast.message}</span>
+            {toast.type === 'error' && <XCircle size={16} className="shrink-0" />}
+            {toast.type === 'success' && <CheckCircle size={16} className="shrink-0" />}
+            {toast.type === 'info' && <Info size={16} className="shrink-0" />}
+            <span className="truncate">{toast.message}</span>
           </div>
         </div>
       )}
 
       <div className="max-w-md mx-auto bg-[#F9FAFB] min-h-screen shadow-[0_0_40px_rgba(0,0,0,0.05)] relative overflow-x-hidden border-x border-slate-100">
-        {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} />}
+        {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} user={user} />}
         
         {currentView === 'admin' && <AdminDashboardView 
           allPendingSlips={allPendingSlips} 
@@ -424,8 +454,8 @@ function Card({ children, className = "" }: any) {
   return <div className={`bg-white rounded-3xl shadow-[0_5px_20px_rgba(0,0,0,0.03)] p-6 md:p-8 border border-slate-100 ${className}`}>{children}</div>;
 }
 
-/* ==================== AUTH SCREEN (Feature 5, 8, 9) ==================== */
-function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, showToast, onGoogleAuth, onForgotPassword, onLogout }: any) {
+/* ==================== AUTH SCREEN ==================== */
+function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, showToast, onGoogleAuth, onForgotPassword, onLogout, user }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -492,8 +522,12 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
             <RoleButton icon={<User />} title="นักศึกษา" onClick={() => onRoleSelect('student')} color="indigo" />
             <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => onRoleSelect('guest')} color="blue" />
             <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setAuthMode('merchant_setup')} color="orange" />
+            
+            {/* Feature 4 Fix: ย้อนกลับไปหน้าเข้าสู่ระบบ */}
             <div className="text-center mt-6 pt-4 border-t border-slate-100">
-              <button onClick={onLogout} className="text-xs font-bold text-slate-400 hover:text-red-500 transition-colors">ย้อนกลับ / ยกเลิกการสมัคร</button>
+              <button onClick={onLogout} className="text-xs font-bold text-slate-400 hover:text-red-500 transition-colors py-2 px-4">
+                ยกเลิก / กลับไปหน้าเข้าสู่ระบบ
+              </button>
             </div>
           </div>
         ) : authMode === 'merchant_setup' ? (
@@ -519,7 +553,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
               {mStoreImage ? <img src={mStoreImage} className="w-full h-full object-cover" alt="store" /> : <div className="text-center"><ImageIcon className="text-orange-300 mx-auto mb-1"/><span className="text-xs font-bold text-orange-400">อัปโหลดรูปหน้าร้าน</span></div>}
               <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
                 const f = e.target.files?.[0];
-                if(f){ const r = new FileReader(); r.onloadend = () => setMStoreImage(r.result as string); r.readAsDataURL(f); }
+                if(f) compressImage(f, setMStoreImage);
               }} />
             </label>
 
@@ -599,7 +633,7 @@ function RoleButton({ icon, title, onClick, color }: any) {
   );
 }
 
-/* ==================== ADMIN DASHBOARD (Feature 3 & 4) ==================== */
+/* ==================== ADMIN DASHBOARD ==================== */
 function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptions, allPayouts, systemSettings, onLogout, showToast, user, userData, onEditName, setIsActionLoading, isActionLoading }: any) {
   const [adminTab, setAdminTab] = useState<'overview' | 'slips' | 'payouts' | 'users' | 'settings'>('overview');
   const db = getFirestore();
@@ -607,9 +641,8 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
   const pendingSlips = allPendingSlips.filter((s: PurchaseSlip) => s.status === 'pending');
   const pendingMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && !u.isApproved && !u.isRejected);
   
-  // Payout Logic (Feature 3)
+  // Payout Logic
   const unpaidRedemptions = allRedemptions.filter((r: Redemption) => r.payoutStatus !== 'paid');
-  // Group by Merchant
   const owedPerMerchant: Record<string, {amount: number, redemptions: string[], merchantData: UserData | undefined}> = {};
   unpaidRedemptions.forEach((r: Redemption) => {
     if(!owedPerMerchant[r.merchantId]) owedPerMerchant[r.merchantId] = { amount: 0, redemptions: [], merchantData: allUsers.find((u: UserData) => u.uid === r.merchantId) };
@@ -620,7 +653,6 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
   const handleApproveSlip = async (slip: PurchaseSlip) => {
     try {
       const db = getFirestore();
-      // Feature 1: Pass is specific to Merchant
       const passQuery = query(collection(db, 'passes'), where('studentUid', '==', slip.studentUid), where('merchantId', '==', slip.merchantId));
       const passDocs = await getDocs(passQuery);
       const addedCoupons = 5 * slip.numSets;
@@ -632,20 +664,12 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
       }
       await updateDoc(doc(db, 'purchases', slip.id), { status: 'approved' });
       
-      // Feature 6 Simulator: Notify Merchant
       const mData = allUsers.find((u: UserData) => u.uid === slip.merchantId);
-      
-      // Notification System Pivot: Use Mock Function instead of LINE Notify
-      sendMerchantNotification(
-        slip.merchantId, 
-        `🎉 MFU Pass: มีการอนุมัติการซื้อพาสใหม่ ${slip.numSets} เซ็ต! (ร้าน: ${mData?.storeName})`
-      );
-      
+      sendMerchantNotification(slip.merchantId, `🎉 MFU Pass: มีการอนุมัติการซื้อพาสใหม่ ${slip.numSets} เซ็ต! (ร้าน: ${mData?.storeName})`);
       showToast(`อนุมัติสำเร็จ! ระบบแจ้งเตือนจำลองทำงานแล้ว`, "success");
     } catch(err) { showToast("Error", "error"); }
   };
 
-  // Feature 4: Payout with Slip Upload
   const [payoutSlip, setPayoutSlip] = useState("");
   const [payingMerchant, setPayingMerchant] = useState("");
 
@@ -653,14 +677,9 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
     if(!payoutSlip) return showToast("กรุณาแนบสลิปโอนเงินก่อน", "error");
     setIsActionLoading(true);
     try {
-      // 1. Create Payout record
       await addDoc(collection(db, 'payouts'), {
-        merchantId,
-        amount: data.amount,
-        slipUrl: payoutSlip,
-        paidAt: new Date().toISOString()
+        merchantId, amount: data.amount, slipUrl: payoutSlip, paidAt: new Date().toISOString()
       });
-      // 2. Mark redemptions as paid
       const batchPromises = data.redemptions.map((rId: string) => updateDoc(doc(db, 'redemptions', rId), { payoutStatus: 'paid' }));
       await Promise.all(batchPromises);
       showToast("บันทึกการโอนเงินสำเร็จ", "success");
@@ -744,7 +763,7 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
           </div>
         )}
 
-        {adminTab === 'payouts' && ( // Feature 3 & 4
+        {adminTab === 'payouts' && (
           <div className="space-y-4 animate-in fade-in">
             {Object.keys(owedPerMerchant).length === 0 ? <p className="text-slate-600 text-sm text-center py-10">All settled up!</p> : 
               Object.entries(owedPerMerchant).map(([mId, data]) => (
@@ -767,7 +786,7 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
                         {payoutSlip ? <img src={payoutSlip} className="max-h-32 object-contain" alt="payout slip"/> : <><Upload size={20} className="text-slate-500 mb-2"/><span className="text-xs font-bold text-indigo-400">แนบสลิปโอนเงิน</span></>}
                         <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
                            const f = e.target.files?.[0];
-                           if(f){ const r = new FileReader(); r.onloadend = () => setPayoutSlip(r.result as string); r.readAsDataURL(f); }
+                           if(f) compressImage(f, setPayoutSlip);
                         }} />
                       </label>
                       <div className="flex gap-2">
@@ -804,9 +823,8 @@ function TabButton({ active, onClick, label, dark = false }: any) {
   );
 }
 
-/* ==================== STUDENT DASHBOARD (Feature 1) ==================== */
+/* ==================== STUDENT DASHBOARD ==================== */
 function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurchase, myPurchases, myRedemptions, onLogout, onBuyPass, onScan, showToast, onEditName }: any) {
-  
   const activePasses = myPasses.filter((p: Pass) => p.remainingCoupons > 0);
   const totalCoupons = activePasses.reduce((sum: number, p: Pass) => sum + p.remainingCoupons, 0);
 
@@ -876,11 +894,10 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
   );
 }
 
-/* ==================== MERCHANT DASHBOARD (Feature 4, 7) ==================== */
+/* ==================== MERCHANT DASHBOARD ==================== */
 function MerchantDashboardView({ user, userData, redemptions, merchantPayouts, onLogout, showToast, onEditName }: any) {
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${user?.uid}&margin=10`;
 
-  // Feature 7: Pause Store
   const togglePause = async () => {
     await updateDoc(doc(getFirestore(), 'users', user.uid), { isPaused: !userData?.isPaused });
     showToast(userData?.isPaused ? "เปิดรับออเดอร์แล้ว" : "ปิดรับออเดอร์ชั่วคราวแล้ว", "info");
@@ -918,7 +935,6 @@ function MerchantDashboardView({ user, userData, redemptions, merchantPayouts, o
                <img src={qrCodeUrl} className="w-40 h-40 object-contain rounded-xl mb-4" alt="Store QR" />
             </div>
 
-            {/* Feature 4: Two-Way Slip Archive */}
             <div>
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">ประวัติการรับเงินโอนจากระบบ (Payouts)</h3>
               <div className="space-y-3">
@@ -943,7 +959,7 @@ function MerchantDashboardView({ user, userData, redemptions, merchantPayouts, o
   );
 }
 
-/* ==================== BUY PASS VIEW (Feature 1 & 7) ==================== */
+/* ==================== BUY PASS VIEW ==================== */
 function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
   const [numSets, setNumSets] = useState(1);
   const [slip, setSlip] = useState<string | null>(null);
@@ -951,18 +967,7 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
   const [isLoading, setIsLoading] = useState(false);
   const totalAmount = Number(settings?.pricePerSet || 79) * numSets;
 
-  // Filter approved and not-paused merchants
   const availableMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved && !u.isPaused);
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if(!file.type.startsWith('image/')) return showToast('กรุณาอัปโหลดรูปภาพเท่านั้น', 'error');
-      const reader = new FileReader();
-      reader.onloadend = () => setSlip(reader.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleConfirm = async () => {
     if (!selectedMerchant) return showToast("กรุณาเลือกร้านค้าก่อน", "error");
@@ -971,7 +976,7 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
     try {
       await addDoc(collection(getFirestore(), 'purchases'), {
         studentUid: user.uid,
-        merchantId: selectedMerchant, // Feature 1
+        merchantId: selectedMerchant,
         numSets,
         totalAmount,
         slipUrl: slip,
@@ -997,7 +1002,6 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
 
       <div className="flex-1 space-y-5">
         
-        {/* Feature 1: Select Merchant */}
         <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">1. เลือกร้านค้าที่จะใช้คูปอง</p>
           <select value={selectedMerchant} onChange={e => setSelectedMerchant(e.target.value)} className="w-full p-4 rounded-2xl border border-slate-200 outline-none font-bold text-slate-700">
@@ -1034,7 +1038,10 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
             {slip ? <img src={slip} className="w-full h-full object-cover" alt="slip" /> : (
               <div className="text-center"><Upload size={32} className="text-indigo-300 mx-auto mb-2" /><p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">อัปโหลดสลิปที่นี่</p></div>
             )}
-            <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
+              const f = e.target.files?.[0];
+              if(f) compressImage(f, setSlip);
+            }} />
           </label>
         </div>
       </div>
@@ -1046,10 +1053,10 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
   );
 }
 
-/* ==================== SCAN QR VIEW (Feature 1, 2) ==================== */
+/* ==================== SCAN QR VIEW ==================== */
 function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess, showToast }: any) {
   const [shopId, setShopId] = useState("");
-  const [useCount, setUseCount] = useState(1); // Feature 2: Multi-coupon
+  const [useCount, setUseCount] = useState(1);
   const [isScanning, setIsScanning] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -1094,15 +1101,13 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
     const cleanShopId = shopId.trim();
     if (!cleanShopId) return showToast("กรุณาระบุ Shop ID", "error");
 
-    // Feature 1: Validate Store-Specific Pass
     const targetPass = myPasses.find((p: Pass) => p.merchantId === cleanShopId && p.remainingCoupons >= useCount);
     if (!targetPass) return showToast("คุณไม่มีคูปองสำหรับร้านนี้ หรือคูปองไม่พอ", "error");
 
-    // Feature 2: Cooldown Check (5 mins)
     const lastRedemption = myRedemptions.filter((r: Redemption) => r.merchantId === cleanShopId).sort((a: Redemption, b: Redemption) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime())[0];
     if (lastRedemption) {
       const diffMins = (new Date().getTime() - new Date(lastRedemption.redeemedAt).getTime()) / 60000;
-      if (diffMins < 5) return showToast(`กรุณารออีก ${Math.ceil(5 - diffMins)} นาทีก่อนสแกนร้านเดิมซ้ำ`, "error");
+      if (diffMins < 5) return showToast(`กรุณารออีก ${Math.ceil(5 - diffMins)} นาทีก่อนสแกนซ้ำ`, "error");
     }
 
     setIsProcessing(true);
@@ -1112,7 +1117,7 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
       await addDoc(collection(db, 'redemptions'), { 
         studentUid: user.uid, 
         merchantId: cleanShopId, 
-        amount: 20 * useCount, // 20 THB per coupon
+        amount: 20 * useCount,
         couponsUsed: useCount,
         payoutStatus: 'pending',
         redeemedAt: new Date().toISOString() 
@@ -1127,7 +1132,6 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col items-center justify-center max-w-md mx-auto font-sans relative overflow-y-auto pb-10">
-      
       <div className="absolute top-8 left-6 z-10">
         <button onClick={onBack} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90"><ChevronLeft size={24}/></button>
       </div>
@@ -1166,7 +1170,6 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
             </div>
           )}
 
-          {/* Feature 2: Multi-Coupon Selection */}
           <div className="flex items-center justify-between bg-black/30 p-2 rounded-2xl mb-6 border border-slate-800">
              <span className="text-xs font-bold text-slate-400 pl-4">จำนวนคูปอง:</span>
              <div className="flex bg-slate-800 rounded-xl">
