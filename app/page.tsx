@@ -106,10 +106,6 @@ const getFirebaseConfig = () => ({
 });
 
 /* ==================== NOTIFICATION SYSTEM (PLACEHOLDER) ==================== */
-/**
- * Generic Placeholder / Mock Function สำหรับการแจ้งเตือนร้านค้า
- * ใช้แทนระบบ LINE Notify ที่ถูกยกเลิกไปแล้ว จะถูกแทนที่ด้วยระบบจริงในอนาคต
- */
 const sendMerchantNotification = (merchantId: string, message: string) => {
   console.log(`Mock Notification to Merchant [${merchantId}]:`, message);
 };
@@ -119,18 +115,17 @@ export default function MFUPassApp() {
   const [user, setUser] = useState<any>(null);
   const [isAppReady, setIsAppReady] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'role_setup' | 'forgot_password'>('login');
+  // Update authMode to handle merchant_setup state explicitly
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'role_setup' | 'merchant_setup' | 'forgot_password'>('login');
   const [currentView, setCurrentView] = useState<string>('auth');
 
   const [userData, setUserData] = useState<UserData | null>(null);
   const [myPasses, setMyPasses] = useState<Pass[]>([]);
   const [pendingPurchase, setPendingPurchase] = useState<any>(null);
   
-  // States: Student/Guest History
   const [myPurchases, setMyPurchases] = useState<PurchaseSlip[]>([]);
   const [myRedemptions, setMyRedemptions] = useState<Redemption[]>([]);
 
-  // States: Admin
   const [allPendingSlips, setAllPendingSlips] = useState<PurchaseSlip[]>([]);
   const [allUsers, setAllUsers] = useState<UserData[]>([]);
   const [allPasses, setAllPasses] = useState<Pass[]>([]);
@@ -148,7 +143,6 @@ export default function MFUPassApp() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Firebase Auth
   useEffect(() => {
     const config = getFirebaseConfig();
     const app = getApps().length === 0 ? initializeApp(config) : getApp();
@@ -169,6 +163,7 @@ export default function MFUPassApp() {
             setUserData(data);
             setCurrentView(data.role);
           } else {
+            // New user without a role doc
             setAuthMode('role_setup');
             setCurrentView('auth');
           }
@@ -184,7 +179,6 @@ export default function MFUPassApp() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Listeners
   useEffect(() => {
     if (!user || currentView === 'auth') return;
     const db = getFirestore();
@@ -256,7 +250,6 @@ export default function MFUPassApp() {
     return () => unsubs.forEach(unsub => unsub());
   }, [user, currentView]);
 
-  // Auth Functions
   const handleAuthAction = async (email: string, pass: string, displayName?: string) => {
     setIsActionLoading(true);
     try {
@@ -277,32 +270,13 @@ export default function MFUPassApp() {
     }
   };
 
-  const handleGoogleAuth = async (role: 'student' | 'guest' | 'merchant') => {
+  const handleGoogleAuth = async () => {
     setIsActionLoading(true);
     try {
       const auth = getAuth();
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      
-      // Feature 8: Google SSO Domain Restriction
-      if (role === 'student' && !result.user.email?.endsWith('@lamduan.mfu.ac.th')) {
-        await signOut(auth);
-        showToast("เฉพาะอีเมล @lamduan.mfu.ac.th สำหรับนักศึกษาเท่านั้น", "error");
-        setIsActionLoading(false);
-        return;
-      }
-
-      // Check if user exists in db
-      const db = getFirestore();
-      const userSnap = await getDoc(doc(db, 'users', result.user.uid));
-      if (!userSnap.exists()) {
-        if (role === 'merchant') {
-          // ถ้าเป็นร้านค้า ต้องไปหน้ากรอกข้อมูลต่อ
-          setAuthMode('role_setup');
-        } else {
-          await handleRoleSelect(role);
-        }
-      }
+      // Simply authenticate here. Role will be checked/assigned in handleRoleSelect.
+      await signInWithPopup(auth, provider);
     } catch (e: any) {
       showToast("เกิดข้อผิดพลาดในการล็อกอินด้วย Google", "error");
     } finally {
@@ -321,10 +295,20 @@ export default function MFUPassApp() {
     }
   };
 
-  const handleLogout = () => signOut(getAuth());
+  const handleLogout = () => {
+    signOut(getAuth());
+    setAuthMode('login');
+  };
 
   const handleRoleSelect = async (role: string, extraData: any = {}) => {
     if (!user) return;
+
+    // Feature 8: Google SSO Domain Restriction for Students
+    if (role === 'student' && !user.email?.endsWith('@lamduan.mfu.ac.th')) {
+      showToast("เฉพาะอีเมล @lamduan.mfu.ac.th สำหรับนักศึกษาเท่านั้น", "error");
+      return;
+    }
+
     setIsActionLoading(true);
     const db = getFirestore();
     const data = {
@@ -375,7 +359,7 @@ export default function MFUPassApp() {
       )}
 
       <div className="max-w-md mx-auto bg-[#F9FAFB] min-h-screen shadow-[0_0_40px_rgba(0,0,0,0.05)] relative overflow-x-hidden border-x border-slate-100">
-        {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} user={user} />}
+        {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} />}
         
         {currentView === 'admin' && <AdminDashboardView 
           allPendingSlips={allPendingSlips} 
@@ -441,14 +425,13 @@ function Card({ children, className = "" }: any) {
 }
 
 /* ==================== AUTH SCREEN (Feature 5, 8, 9) ==================== */
-function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, showToast, onGoogleAuth, onForgotPassword, user }: any) {
+function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, showToast, onGoogleAuth, onForgotPassword, onLogout }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   // Merchant Setup Form
-  const [isMerchantSetup, setIsMerchantSetup] = useState(false);
   const [mStoreName, setMStoreName] = useState("");
   const [mLocation, setMLocation] = useState("");
   const [mCategory, setMCategory] = useState("Food");
@@ -494,7 +477,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
       <div className="w-full max-w-sm animate-in fade-in duration-700">
         
-        {!isMerchantSetup && (
+        {authMode !== 'merchant_setup' && (
           <div className="flex flex-col items-center mb-8">
             <div className="w-20 h-20 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-lg shadow-indigo-200 mb-6 rotate-3">
               <Ticket size={40} className="text-white" />
@@ -504,57 +487,58 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
         )}
 
         {authMode === 'role_setup' ? (
-          !isMerchantSetup ? (
-            <div className="space-y-4 animate-in slide-in-from-bottom-4">
-              <p className="text-center text-slate-500 font-bold text-xs uppercase tracking-widest mb-6">เลือกบทบาทของคุณ</p>
-              <RoleButton icon={<User />} title="นักศึกษา" onClick={() => user ? onRoleSelect('student') : onGoogleAuth('student')} color="indigo" />
-              <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => user ? onRoleSelect('guest') : onGoogleAuth('guest')} color="blue" />
-              <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setIsMerchantSetup(true)} color="orange" />
+          <div className="space-y-4 animate-in slide-in-from-bottom-4">
+            <p className="text-center text-slate-500 font-bold text-xs uppercase tracking-widest mb-6">เลือกบทบาทของคุณ</p>
+            <RoleButton icon={<User />} title="นักศึกษา" onClick={() => onRoleSelect('student')} color="indigo" />
+            <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => onRoleSelect('guest')} color="blue" />
+            <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setAuthMode('merchant_setup')} color="orange" />
+            <div className="text-center mt-6 pt-4 border-t border-slate-100">
+              <button onClick={onLogout} className="text-xs font-bold text-slate-400 hover:text-red-500 transition-colors">ย้อนกลับ / ยกเลิกการสมัคร</button>
             </div>
-          ) : (
-            <form onSubmit={handleMerchantSubmit} className="space-y-4 animate-in slide-in-from-right-4 max-h-[80vh] overflow-y-auto pb-10 px-2 scrollbar-hide">
-              <div className="text-center mb-4">
-                <h2 className="text-2xl font-black text-slate-800">ข้อมูลร้านค้าพาร์ทเนอร์</h2>
-              </div>
+          </div>
+        ) : authMode === 'merchant_setup' ? (
+          <form onSubmit={handleMerchantSubmit} className="space-y-4 animate-in slide-in-from-right-4 max-h-[85vh] overflow-y-auto pb-10 px-2 scrollbar-hide">
+            <div className="text-center mb-4">
+              <h2 className="text-2xl font-black text-slate-800">ข้อมูลร้านค้าพาร์ทเนอร์</h2>
+            </div>
 
-              <div className="space-y-3">
-                <input type="text" placeholder="ชื่อร้านค้า" value={mStoreName} onChange={(e: any) => setMStoreName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
-                <input type="text" placeholder="โซนที่ตั้งโรงอาหาร" value={mLocation} onChange={(e: any) => setMLocation(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
-                <select value={mCategory} onChange={(e: any) => setMCategory(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium bg-white">
-                  <option value="Food">อาหาร</option>
-                  <option value="Beverage">เครื่องดื่ม</option>
-                  <option value="Snack">ของทานเล่น</option>
-                </select>
-                <input type="text" placeholder="ชื่อ-นามสกุล เจ้าของร้าน" value={mOwnerName} onChange={(e: any) => setMOwnerName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
-                <input type="text" placeholder="ธนาคารที่ใช้รับเงิน" value={mBankName} onChange={(e: any) => setMBankName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
-                <input type="text" placeholder="เลขที่บัญชี (ชื่อต้องตรงกับเจ้าของ)" value={mBankAccount} onChange={(e: any) => setMBankAccount(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
-              </div>
+            <div className="space-y-3">
+              <input type="text" placeholder="ชื่อร้านค้า" value={mStoreName} onChange={(e: any) => setMStoreName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
+              <input type="text" placeholder="โซนที่ตั้งโรงอาหาร" value={mLocation} onChange={(e: any) => setMLocation(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
+              <select value={mCategory} onChange={(e: any) => setMCategory(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium bg-white">
+                <option value="Food">อาหาร</option>
+                <option value="Beverage">เครื่องดื่ม</option>
+                <option value="Snack">ของทานเล่น</option>
+              </select>
+              <input type="text" placeholder="ชื่อ-นามสกุล เจ้าของร้าน" value={mOwnerName} onChange={(e: any) => setMOwnerName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
+              <input type="text" placeholder="ธนาคารที่ใช้รับเงิน" value={mBankName} onChange={(e: any) => setMBankName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
+              <input type="text" placeholder="เลขที่บัญชี (ชื่อต้องตรงกับเจ้าของ)" value={mBankAccount} onChange={(e: any) => setMBankAccount(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-orange-500 outline-none text-sm font-medium" required />
+            </div>
 
-              <label className="border-2 border-dashed border-orange-200 rounded-xl h-32 flex flex-col items-center justify-center cursor-pointer hover:bg-orange-50 overflow-hidden relative mt-2">
-                {mStoreImage ? <img src={mStoreImage} className="w-full h-full object-cover" alt="store" /> : <div className="text-center"><ImageIcon className="text-orange-300 mx-auto mb-1"/><span className="text-xs font-bold text-orange-400">อัปโหลดรูปหน้าร้าน</span></div>}
-                <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
-                  const f = e.target.files?.[0];
-                  if(f){ const r = new FileReader(); r.onloadend = () => setMStoreImage(r.result as string); r.readAsDataURL(f); }
-                }} />
+            <label className="border-2 border-dashed border-orange-200 rounded-xl h-32 flex flex-col items-center justify-center cursor-pointer hover:bg-orange-50 overflow-hidden relative mt-2 bg-white">
+              {mStoreImage ? <img src={mStoreImage} className="w-full h-full object-cover" alt="store" /> : <div className="text-center"><ImageIcon className="text-orange-300 mx-auto mb-1"/><span className="text-xs font-bold text-orange-400">อัปโหลดรูปหน้าร้าน</span></div>}
+              <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
+                const f = e.target.files?.[0];
+                if(f){ const r = new FileReader(); r.onloadend = () => setMStoreImage(r.result as string); r.readAsDataURL(f); }
+              }} />
+            </label>
+
+            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={acceptedPolicy} onChange={(e: any) => setAcceptedPolicy(e.target.checked)} className="mt-1" />
+                <span className="text-[10px] text-orange-900 leading-tight">ข้าพเจ้ายินยอมให้หักค่าธรรมเนียม 9 บาท/รอบบิล, รับโอนเงินรายสัปดาห์, ยินยอมให้ส่วนลด 20 บาท/คูปอง และยอมรับเงื่อนไขทางกฎหมายหากพบการทุจริต</span>
               </label>
+            </div>
 
-              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-4">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={acceptedPolicy} onChange={(e: any) => setAcceptedPolicy(e.target.checked)} className="mt-1" />
-                  <span className="text-[10px] text-orange-900 leading-tight">ข้าพเจ้ายินยอมให้หักค่าธรรมเนียม 9 บาท/รอบบิล, รับโอนเงินรายสัปดาห์, ยินยอมให้ส่วนลด 20 บาท/คูปอง และยอมรับเงื่อนไขทางกฎหมายหากพบการทุจริต</span>
-                </label>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setIsMerchantSetup(false)} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl text-sm">ยกเลิก</button>
-                <button type="submit" className="w-2/3 bg-orange-500 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 text-sm">ส่งคำขอเปิดร้าน</button>
-              </div>
-            </form>
-          )
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setAuthMode('role_setup')} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl text-sm hover:bg-slate-200">ยกเลิก</button>
+              <button type="submit" className="w-2/3 bg-orange-500 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95 text-sm">ส่งคำขอเปิดร้าน</button>
+            </div>
+          </form>
         ) : (
           <>
             {/* Google Sign-In */}
-            <button onClick={() => setAuthMode('role_setup')} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-6">
+            <button onClick={onGoogleAuth} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-6 active:scale-95">
               <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Sign in with Google
             </button>
