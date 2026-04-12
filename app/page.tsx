@@ -208,7 +208,8 @@ export default function MFUPassApp() {
     const newName = prompt("ตั้งชื่อผู้ใช้งาน (Display Name) ใหม่:", userData?.displayName || "");
     if (newName && newName.trim() !== "") {
       const db = getFirestore();
-      await updateDoc(doc(db, 'users', user.uid), { displayName: newName.trim() }, { merge: true } as any);
+      // อัปเดตข้อมูลโดยไม่ต้องใส่ merge: true เพราะ updateDoc ทำงานเฉพาะ field ที่ส่งไปอยู่แล้ว
+      await updateDoc(doc(db, 'users', user.uid), { displayName: newName.trim() });
       showToast("อัปเดตชื่อผู้ใช้งานสำเร็จ", "success");
     }
   };
