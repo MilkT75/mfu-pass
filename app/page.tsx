@@ -49,7 +49,7 @@ interface PurchaseSlip {
   totalAmount: number;
   slipUrl: string;
   status: 'pending' | 'approved' | 'rejected';
-  payoutStatus?: 'pending' | 'paid'; // Added for Payout logic
+  payoutStatus?: 'pending' | 'paid'; 
   createdAt: string;
 }
 
@@ -80,7 +80,7 @@ interface Payout {
 
 interface AppSettings {
   pricePerSet: number;
-  platformFee: number; // Added Platform Fee
+  platformFee: number; 
   promptPayQr: string | null;
 }
 
@@ -212,7 +212,14 @@ export default function MFUPassApp() {
     const unsubs: (() => void)[] = [];
 
     unsubs.push(onSnapshot(doc(db, 'settings', 'global'), (snap) => {
-      if (snap.exists()) setSystemSettings(snap.data() as AppSettings);
+      if (snap.exists()) {
+        const data = snap.data() as AppSettings;
+        setSystemSettings({
+          pricePerSet: Number(data.pricePerSet) || 79,
+          platformFee: Number(data.platformFee) || 9,
+          promptPayQr: data.promptPayQr
+        });
+      }
     }));
 
     if (['student', 'guest'].includes(currentView) || currentView === 'buy_pass' || currentView === 'scan_qr') {
@@ -245,7 +252,6 @@ export default function MFUPassApp() {
         setRedemptions(filtered);
       }));
 
-      // Merchant Sales for calculation
       unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
         const sales = snap.docs.filter((d: any) => d.data().merchantId === user.uid && d.data().status === 'approved').map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip));
         setMerchantSales(sales);
@@ -470,7 +476,6 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Merchant Setup Form
   const [mStoreName, setMStoreName] = useState("");
   const [mLocation, setMLocation] = useState("");
   const [mCategory, setMCategory] = useState("Food");
@@ -657,11 +662,14 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   const approvedMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved);
   const studentAndGuests = allUsers.filter((u: UserData) => u.role === 'student' || u.role === 'guest');
   
-  // Advanced Financial Calculations
+  // Advanced Financial Calculations (With Safe Fallbacks)
+  const sysPrice = Number(systemSettings?.pricePerSet) || 79;
+  const sysFee = Number(systemSettings?.platformFee) || 9;
+
   const totalApprovedSets = approvedPurchases.reduce((sum: number, p: PurchaseSlip) => sum + Number(p.numSets), 0);
-  const totalGrossRevenue = totalApprovedSets * systemSettings.pricePerSet; // ยอดเงินรวมทั้งหมดที่เด็กจ่ายมา
-  const totalPlatformRevenue = totalApprovedSets * systemSettings.platformFee; // ส่วนแบ่งเรา
-  const totalPayableStore = totalApprovedSets * (systemSettings.pricePerSet - systemSettings.platformFee); // เงินทั้งหมดที่ต้องให้ร้าน
+  const totalGrossRevenue = totalApprovedSets * sysPrice; 
+  const totalPlatformRevenue = totalApprovedSets * sysFee; 
+  const totalPayableStore = totalApprovedSets * (sysPrice - sysFee);
 
   const saveSettings = async () => {
     await setDoc(doc(db, 'settings', 'global'), { pricePerSet: Number(pricePerSet), platformFee: Number(platformFee), promptPayQr }, { merge: true });
@@ -679,7 +687,6 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   const handleApproveSlip = async (slip: PurchaseSlip) => {
     try {
       const db = getFirestore();
-      // Feature 1: Pass is specific to Merchant
       const passQuery = query(collection(db, 'passes'), where('studentUid', '==', slip.studentUid), where('merchantId', '==', slip.merchantId));
       const passDocs = await getDocs(passQuery);
       const addedCoupons = 5 * slip.numSets;
@@ -689,17 +696,14 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
       } else {
         await addDoc(collection(db, 'passes'), { studentUid: slip.studentUid, merchantId: slip.merchantId, remainingCoupons: addedCoupons });
       }
-      // Note: Payout status is implicitly pending until admin pays merchant
       await updateDoc(doc(db, 'purchases', slip.id), { status: 'approved' });
       
-      // Feature 6 Simulator: Notify Merchant
       const mData = allUsers.find((u: UserData) => u.uid === slip.merchantId);
       sendMerchantNotification(slip.merchantId, `🎉 MFU Pass: มีการอนุมัติการซื้อพาสใหม่ ${slip.numSets} เซ็ต! (ร้าน: ${mData?.storeName})`);
       showToast(`อนุมัติสำเร็จ! ระบบแจ้งเตือนจำลองทำงานแล้ว`, "success");
     } catch(err) { showToast("Error", "error"); }
   };
 
-  // Payout based on SALES (PurchaseSlips) instead of Redemptions
   const [payoutSlip, setPayoutSlip] = useState("");
   const [payingMerchant, setPayingMerchant] = useState("");
 
@@ -707,11 +711,9 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
     if(!payoutSlip) return showToast("กรุณาแนบสลิปโอนเงินก่อน", "error");
     setIsActionLoading(true);
     try {
-      // 1. Create Payout record
       await addDoc(collection(db, 'payouts'), {
         merchantId, amount: amountOwed, slipUrl: payoutSlip, paidAt: new Date().toISOString()
       });
-      // 2. Mark purchases as paid
       const batchPromises = unpaidPurchases.map((p: PurchaseSlip) => updateDoc(doc(db, 'purchases', p.id), { payoutStatus: 'paid' }));
       await Promise.all(batchPromises);
       showToast("บันทึกการโอนเงินสำเร็จ", "success");
@@ -837,8 +839,8 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
             {approvedMerchants.length === 0 ? <p className="text-slate-600 text-sm text-center py-10">No approved partners.</p> : 
               approvedMerchants.map((m: UserData) => {
                 const unpaidPurchases = approvedPurchases.filter((p: PurchaseSlip) => p.merchantId === m.uid && p.payoutStatus !== 'paid');
-                const unpaidSets = unpaidPurchases.reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
-                const owedAmount = unpaidSets * (systemSettings.pricePerSet - systemSettings.platformFee);
+                const unpaidSets = unpaidPurchases.reduce((sum: number, p: PurchaseSlip) => sum + Number(p.numSets), 0);
+                const owedAmount = unpaidSets * (sysPrice - sysFee);
 
                 return (
                   <div key={m.uid} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800">
@@ -1109,14 +1111,17 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
 function MerchantDashboardView({ user, userData, redemptions, merchantSales, merchantPayouts, systemSettings, onLogout, showToast, onEditName }: any) {
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${user?.uid}&margin=10`;
 
+  const sysPrice = Number(systemSettings?.pricePerSet) || 79;
+  const sysFee = Number(systemSettings?.platformFee) || 9;
+
   const togglePause = async () => {
     await updateDoc(doc(getFirestore(), 'users', user.uid), { isPaused: !userData?.isPaused });
     showToast(userData?.isPaused ? "เปิดรับออเดอร์แล้ว" : "ปิดรับออเดอร์ชั่วคราวแล้ว", "info");
   };
 
-  const totalSetsSold = merchantSales.reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
-  const totalUnpaidSets = merchantSales.filter((p: PurchaseSlip) => p.payoutStatus !== 'paid').reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
-  const amountOwed = totalUnpaidSets * (systemSettings.pricePerSet - systemSettings.platformFee);
+  const totalSetsSold = merchantSales.reduce((sum: number, p: PurchaseSlip) => sum + Number(p.numSets), 0);
+  const totalUnpaidSets = merchantSales.filter((p: PurchaseSlip) => p.payoutStatus !== 'paid').reduce((sum: number, p: PurchaseSlip) => sum + Number(p.numSets), 0);
+  const amountOwed = totalUnpaidSets * (sysPrice - sysFee);
 
   const downloadQR = async () => {
     try {
@@ -1159,7 +1164,7 @@ function MerchantDashboardView({ user, userData, redemptions, merchantSales, mer
               </div>
               <div className="text-[6rem] font-black leading-none text-orange-500 mb-6 relative z-10">{totalSetsSold}</div>
               <div className="bg-orange-50 py-5 rounded-2xl border border-orange-100 shadow-inner relative z-10">
-                <p className="text-orange-400 text-[10px] font-black uppercase tracking-widest mb-1">ยอดค้างจ่ายจากระบบ</p>
+                <p className="text-orange-400 text-[10px] font-black uppercase tracking-widest mb-1">ยอดค้างจ่ายจากระบบ (รันออโต้)</p>
                 <p className="text-4xl font-black text-orange-600">{amountOwed} <span className="text-xl">฿</span></p>
               </div>
             </Card>
