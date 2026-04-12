@@ -8,7 +8,7 @@ import {
   Plus, Minus, Eye, EyeOff, Copy, Sparkles, Image as ImageIcon,
   XCircle, ScanLine, Edit2, MapPin, AlertTriangle, MessageSquareWarning, 
   Download, FileText, Info, Trash2, ArrowDownLeft, ArrowUpRight, Receipt,
-  ChevronRight, Building, CreditCard, Power, PowerOff
+  ChevronRight, Building, CreditCard, Power, PowerOff, Store as StoreIcon, X
 } from "lucide-react";
 
 import { initializeApp, getApps, getApp } from "firebase/app";
@@ -49,6 +49,7 @@ interface PurchaseSlip {
   totalAmount: number;
   slipUrl: string;
   status: 'pending' | 'approved' | 'rejected';
+  payoutStatus?: 'pending' | 'paid'; // Added for Payout logic
   createdAt: string;
 }
 
@@ -79,6 +80,7 @@ interface Payout {
 
 interface AppSettings {
   pricePerSet: number;
+  platformFee: number; // Added Platform Fee
   promptPayQr: string | null;
 }
 
@@ -110,7 +112,6 @@ const sendMerchantNotification = (merchantId: string, message: string) => {
 };
 
 /* ==================== IMAGE COMPRESSOR ==================== */
-// ป้องกันปัญหาการอัปโหลดไฟล์ภาพขนาดใหญ่เกินลิมิต 1MB ของ Firestore
 const compressImage = (file: File, callback: (base64: string) => void) => {
   const reader = new FileReader();
   reader.onload = (e: any) => {
@@ -150,15 +151,18 @@ export default function MFUPassApp() {
   const [myPurchases, setMyPurchases] = useState<PurchaseSlip[]>([]);
   const [myRedemptions, setMyRedemptions] = useState<Redemption[]>([]);
 
-  const [allPendingSlips, setAllPendingSlips] = useState<PurchaseSlip[]>([]);
+  // System Wide States
+  const [allPurchases, setAllPurchases] = useState<PurchaseSlip[]>([]);
   const [allUsers, setAllUsers] = useState<UserData[]>([]);
   const [allPasses, setAllPasses] = useState<Pass[]>([]);
   const [allRedemptions, setAllRedemptions] = useState<Redemption[]>([]);
   const [allPayouts, setAllPayouts] = useState<Payout[]>([]);
   
+  // Merchant States
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  const [merchantSales, setMerchantSales] = useState<PurchaseSlip[]>([]);
   const [merchantPayouts, setMerchantPayouts] = useState<Payout[]>([]);
-  const [systemSettings, setSystemSettings] = useState<AppSettings>({ pricePerSet: 79, promptPayQr: null });
+  const [systemSettings, setSystemSettings] = useState<AppSettings>({ pricePerSet: 79, platformFee: 9, promptPayQr: null });
 
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
@@ -241,6 +245,12 @@ export default function MFUPassApp() {
         setRedemptions(filtered);
       }));
 
+      // Merchant Sales for calculation
+      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
+        const sales = snap.docs.filter((d: any) => d.data().merchantId === user.uid && d.data().status === 'approved').map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip));
+        setMerchantSales(sales);
+      }));
+
       unsubs.push(onSnapshot(collection(db, 'payouts'), (snap) => {
         const filtered = snap.docs.filter((d: any) => d.data().merchantId === user.uid).map((d: any) => ({ id: d.id, ...d.data() } as Payout));
         filtered.sort((a: Payout, b: Payout) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
@@ -250,7 +260,7 @@ export default function MFUPassApp() {
 
     if (currentView === 'admin') {
       unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
-        setAllPendingSlips(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip)));
+        setAllPurchases(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip)));
       }));
       unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
         setAllUsers(snap.docs.map((d: any) => ({ uid: d.id, ...d.data() } as UserData)));
@@ -300,7 +310,6 @@ export default function MFUPassApp() {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (e: any) {
-      // โชว์ Error เต็มๆ เพื่อให้รู้ว่าติดปัญหาเรื่อง Domain หรือเปล่า
       showToast(e.message || "เกิดข้อผิดพลาดในการล็อกอินด้วย Google", "error");
     } finally {
       setIsActionLoading(false);
@@ -392,7 +401,7 @@ export default function MFUPassApp() {
         {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} user={user} />}
         
         {currentView === 'admin' && <AdminDashboardView 
-          allPendingSlips={allPendingSlips} 
+          allPurchases={allPurchases} 
           allUsers={allUsers} 
           allPasses={allPasses}
           allRedemptions={allRedemptions}
@@ -409,7 +418,7 @@ export default function MFUPassApp() {
         
         {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} userData={userData} myPasses={myPasses} allUsers={allUsers} pendingPurchase={pendingPurchase} myPurchases={myPurchases} myRedemptions={myRedemptions} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} onEditName={handleEditName} />}
         
-        {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} merchantPayouts={merchantPayouts} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
+        {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} merchantSales={merchantSales} merchantPayouts={merchantPayouts} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
         
         {currentView === 'buy_pass' && <BuyPassView settings={systemSettings} allUsers={allUsers} onBack={() => setCurrentView(userData?.role || 'student')} user={user} showToast={showToast} />}
         
@@ -523,7 +532,6 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
             <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => onRoleSelect('guest')} color="blue" />
             <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setAuthMode('merchant_setup')} color="orange" />
             
-            {/* Feature 4 Fix: ย้อนกลับไปหน้าเข้าสู่ระบบ */}
             <div className="text-center mt-6 pt-4 border-t border-slate-100">
               <button onClick={onLogout} className="text-xs font-bold text-slate-400 hover:text-red-500 transition-colors py-2 px-4">
                 ยกเลิก / กลับไปหน้าเข้าสู่ระบบ
@@ -560,7 +568,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
             <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-4">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={acceptedPolicy} onChange={(e: any) => setAcceptedPolicy(e.target.checked)} className="mt-1" />
-                <span className="text-[10px] text-orange-900 leading-tight">ข้าพเจ้ายินยอมให้หักค่าธรรมเนียม 9 บาท/รอบบิล, รับโอนเงินรายสัปดาห์, ยินยอมให้ส่วนลด 20 บาท/คูปอง และยอมรับเงื่อนไขทางกฎหมายหากพบการทุจริต</span>
+                <span className="text-[10px] text-orange-900 leading-tight">ข้าพเจ้ายินยอมให้หักค่าธรรมเนียมแพลตฟอร์ม, รับโอนเงินรายสัปดาห์, และยอมรับเงื่อนไขทางกฎหมายหากพบการทุจริต</span>
               </label>
             </div>
 
@@ -634,25 +642,44 @@ function RoleButton({ icon, title, onClick, color }: any) {
 }
 
 /* ==================== ADMIN DASHBOARD ==================== */
-function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptions, allPayouts, systemSettings, onLogout, showToast, user, userData, onEditName, setIsActionLoading, isActionLoading }: any) {
-  const [adminTab, setAdminTab] = useState<'overview' | 'slips' | 'payouts' | 'users' | 'settings'>('overview');
+function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions, allPayouts, systemSettings, onLogout, showToast, user, userData, onEditName, setIsActionLoading, isActionLoading }: any) {
+  const [adminTab, setAdminTab] = useState<'overview' | 'slips' | 'partners' | 'users' | 'settings'>('overview');
+  const [selectedMerchantForDetails, setSelectedMerchantForDetails] = useState<UserData | null>(null);
   const db = getFirestore();
 
-  const pendingSlips = allPendingSlips.filter((s: PurchaseSlip) => s.status === 'pending');
+  const [pricePerSet, setPricePerSet] = useState(systemSettings.pricePerSet || 79);
+  const [platformFee, setPlatformFee] = useState(systemSettings.platformFee || 9);
+  const [promptPayQr, setPromptPayQr] = useState(systemSettings.promptPayQr || "");
+
+  const pendingSlips = allPurchases.filter((s: PurchaseSlip) => s.status === 'pending');
+  const approvedPurchases = allPurchases.filter((s: PurchaseSlip) => s.status === 'approved');
   const pendingMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && !u.isApproved && !u.isRejected);
+  const approvedMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved);
+  const studentAndGuests = allUsers.filter((u: UserData) => u.role === 'student' || u.role === 'guest');
   
-  // Payout Logic
-  const unpaidRedemptions = allRedemptions.filter((r: Redemption) => r.payoutStatus !== 'paid');
-  const owedPerMerchant: Record<string, {amount: number, redemptions: string[], merchantData: UserData | undefined}> = {};
-  unpaidRedemptions.forEach((r: Redemption) => {
-    if(!owedPerMerchant[r.merchantId]) owedPerMerchant[r.merchantId] = { amount: 0, redemptions: [], merchantData: allUsers.find((u: UserData) => u.uid === r.merchantId) };
-    owedPerMerchant[r.merchantId].amount += r.amount;
-    owedPerMerchant[r.merchantId].redemptions.push(r.id);
-  });
+  // Advanced Financial Calculations
+  const totalApprovedSets = approvedPurchases.reduce((sum: number, p: PurchaseSlip) => sum + Number(p.numSets), 0);
+  const totalGrossRevenue = totalApprovedSets * systemSettings.pricePerSet; // ยอดเงินรวมทั้งหมดที่เด็กจ่ายมา
+  const totalPlatformRevenue = totalApprovedSets * systemSettings.platformFee; // ส่วนแบ่งเรา
+  const totalPayableStore = totalApprovedSets * (systemSettings.pricePerSet - systemSettings.platformFee); // เงินทั้งหมดที่ต้องให้ร้าน
+
+  const saveSettings = async () => {
+    await setDoc(doc(db, 'settings', 'global'), { pricePerSet: Number(pricePerSet), platformFee: Number(platformFee), promptPayQr }, { merge: true });
+    showToast("บันทึกการตั้งค่าสำเร็จ", "success");
+  };
+
+  const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if(!file.type.startsWith('image/')) return showToast('กรุณาอัปโหลดรูปภาพ', 'error');
+      compressImage(file, setPromptPayQr);
+    }
+  };
 
   const handleApproveSlip = async (slip: PurchaseSlip) => {
     try {
       const db = getFirestore();
+      // Feature 1: Pass is specific to Merchant
       const passQuery = query(collection(db, 'passes'), where('studentUid', '==', slip.studentUid), where('merchantId', '==', slip.merchantId));
       const passDocs = await getDocs(passQuery);
       const addedCoupons = 5 * slip.numSets;
@@ -662,30 +689,53 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
       } else {
         await addDoc(collection(db, 'passes'), { studentUid: slip.studentUid, merchantId: slip.merchantId, remainingCoupons: addedCoupons });
       }
+      // Note: Payout status is implicitly pending until admin pays merchant
       await updateDoc(doc(db, 'purchases', slip.id), { status: 'approved' });
       
+      // Feature 6 Simulator: Notify Merchant
       const mData = allUsers.find((u: UserData) => u.uid === slip.merchantId);
       sendMerchantNotification(slip.merchantId, `🎉 MFU Pass: มีการอนุมัติการซื้อพาสใหม่ ${slip.numSets} เซ็ต! (ร้าน: ${mData?.storeName})`);
       showToast(`อนุมัติสำเร็จ! ระบบแจ้งเตือนจำลองทำงานแล้ว`, "success");
     } catch(err) { showToast("Error", "error"); }
   };
 
+  // Payout based on SALES (PurchaseSlips) instead of Redemptions
   const [payoutSlip, setPayoutSlip] = useState("");
   const [payingMerchant, setPayingMerchant] = useState("");
 
-  const executePayout = async (merchantId: string, data: any) => {
+  const executePayout = async (merchantId: string, unpaidPurchases: PurchaseSlip[], amountOwed: number) => {
     if(!payoutSlip) return showToast("กรุณาแนบสลิปโอนเงินก่อน", "error");
     setIsActionLoading(true);
     try {
+      // 1. Create Payout record
       await addDoc(collection(db, 'payouts'), {
-        merchantId, amount: data.amount, slipUrl: payoutSlip, paidAt: new Date().toISOString()
+        merchantId, amount: amountOwed, slipUrl: payoutSlip, paidAt: new Date().toISOString()
       });
-      const batchPromises = data.redemptions.map((rId: string) => updateDoc(doc(db, 'redemptions', rId), { payoutStatus: 'paid' }));
+      // 2. Mark purchases as paid
+      const batchPromises = unpaidPurchases.map((p: PurchaseSlip) => updateDoc(doc(db, 'purchases', p.id), { payoutStatus: 'paid' }));
       await Promise.all(batchPromises);
       showToast("บันทึกการโอนเงินสำเร็จ", "success");
       setPayoutSlip(""); setPayingMerchant("");
     } catch(e) { showToast("Error", "error"); }
     setIsActionLoading(false);
+  };
+
+  const handleEditCoupons = async (studentUid: string, passId?: string, currentAmount?: number) => {
+    const newAmountStr = prompt(`ระบุจำนวนคูปองใหม่ (ปัจจุบัน: ${currentAmount || 0} ใบ):`, currentAmount ? String(currentAmount) : "0");
+    if (newAmountStr === null) return; 
+    const newAmount = parseInt(newAmountStr);
+    if (isNaN(newAmount) || newAmount < 0) return showToast("กรุณาระบุตัวเลขที่ถูกต้อง", "error");
+
+    try {
+      if (passId) {
+        await updateDoc(doc(db, 'passes', passId), { remainingCoupons: newAmount });
+      } else {
+        await addDoc(collection(db, 'passes'), { studentUid, merchantId: "SYSTEM", remainingCoupons: newAmount });
+      }
+      showToast("อัปเดตจำนวนคูปองสำเร็จ", "success");
+    } catch (e) {
+      showToast("เกิดข้อผิดพลาดในการอัปเดตคูปอง", "error");
+    }
   };
 
   return (
@@ -695,22 +745,41 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
       <div className="px-6 pt-2 pb-2 flex gap-2 overflow-x-auto scrollbar-hide bg-slate-950 shrink-0">
         <TabButton active={adminTab==='overview'} onClick={()=>setAdminTab('overview')} label="Overview" dark />
         <TabButton active={adminTab==='slips'} onClick={()=>setAdminTab('slips')} label={`Slips (${pendingSlips.length})`} dark />
-        <TabButton active={adminTab==='payouts'} onClick={()=>setAdminTab('payouts')} label={`Payouts (${Object.keys(owedPerMerchant).length})`} dark />
-        <TabButton active={adminTab==='users'} onClick={()=>setAdminTab('users')} label="Users" dark />
+        <TabButton active={adminTab==='partners'} onClick={()=>setAdminTab('partners')} label={`Partners (${approvedMerchants.length})`} dark />
+        <TabButton active={adminTab==='users'} onClick={()=>setAdminTab('users')} label={`Users (${studentAndGuests.length})`} dark />
+        <TabButton active={adminTab==='settings'} onClick={()=>setAdminTab('settings')} label="Settings" dark />
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
         {adminTab === 'overview' && (
           <div className="space-y-6 animate-in fade-in">
+            {/* Financial Metrics */}
+            <div className="bg-slate-900 rounded-[2rem] p-6 border border-slate-800 shadow-xl text-center">
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">ยอดเงินรวมก่อนหัก (Total Gross)</p>
+              <p className="text-5xl font-black text-white mb-6">{totalGrossRevenue.toLocaleString()} <span className="text-2xl text-slate-500">฿</span></p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-800 p-4 rounded-2xl">
+                  <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-widest mb-1">ส่วนแบ่งเรา (Platform)</p>
+                  <p className="text-2xl font-black text-indigo-300">{totalPlatformRevenue.toLocaleString()} ฿</p>
+                </div>
+                <div className="bg-slate-800 p-4 rounded-2xl">
+                  <p className="text-green-400 text-[10px] font-bold uppercase tracking-widest mb-1">ต้องให้ร้าน (Payable)</p>
+                  <p className="text-2xl font-black text-green-300">{totalPayableStore.toLocaleString()} ฿</p>
+                </div>
+              </div>
+              <p className="text-slate-500 text-[10px] mt-4">จำนวนการซื้อพาสทั้งหมด: {totalApprovedSets} เซ็ต</p>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 text-center">
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 text-center">
                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">รอยืนยันสลิป</p>
                 <p className="text-3xl font-black text-amber-400">{pendingSlips.length}</p>
               </div>
-              <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 text-center">
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">รอจ่ายเงินร้านค้า</p>
-                <p className="text-3xl font-black text-green-400">{Object.keys(owedPerMerchant).length}</p>
+              <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 text-center">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">ร้านค้าใหม่</p>
+                <p className="text-3xl font-black text-blue-400">{pendingMerchants.length}</p>
               </div>
             </div>
 
@@ -763,47 +832,143 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allRedemptio
           </div>
         )}
 
-        {adminTab === 'payouts' && (
+        {adminTab === 'partners' && (
           <div className="space-y-4 animate-in fade-in">
-            {Object.keys(owedPerMerchant).length === 0 ? <p className="text-slate-600 text-sm text-center py-10">All settled up!</p> : 
-              Object.entries(owedPerMerchant).map(([mId, data]) => (
-                <div key={mId} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800">
-                  <div className="flex justify-between items-center mb-4">
-                    <div>
-                      <p className="font-bold text-white text-lg">{data.merchantData?.storeName || 'Unknown Store'}</p>
-                      <p className="text-xs text-slate-400">{data.merchantData?.bankName} - {data.merchantData?.bankAccount}</p>
-                      <p className="text-xs text-slate-400">{data.merchantData?.ownerName}</p>
-                    </div>
-                    <div className="text-right bg-green-500/20 p-3 rounded-xl">
-                      <p className="text-[10px] font-bold text-green-500 uppercase">ยอดโอน</p>
-                      <p className="font-black text-xl text-green-400">{data.amount} ฿</p>
-                    </div>
-                  </div>
-                  
-                  {payingMerchant === mId ? (
-                    <div className="bg-black/50 p-4 rounded-2xl mt-4">
-                       <label className="w-full bg-slate-800 border border-slate-700 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer mb-4 hover:border-indigo-500">
-                        {payoutSlip ? <img src={payoutSlip} className="max-h-32 object-contain" alt="payout slip"/> : <><Upload size={20} className="text-slate-500 mb-2"/><span className="text-xs font-bold text-indigo-400">แนบสลิปโอนเงิน</span></>}
-                        <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
-                           const f = e.target.files?.[0];
-                           if(f) compressImage(f, setPayoutSlip);
-                        }} />
-                      </label>
-                      <div className="flex gap-2">
-                        <button onClick={() => setPayingMerchant("")} className="flex-1 bg-slate-800 text-slate-300 py-3 rounded-xl text-xs font-bold">ยกเลิก</button>
-                        <button onClick={() => executePayout(mId, data)} disabled={!payoutSlip || isActionLoading} className="flex-1 bg-green-600 text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">ยืนยันการจ่าย</button>
+            {approvedMerchants.length === 0 ? <p className="text-slate-600 text-sm text-center py-10">No approved partners.</p> : 
+              approvedMerchants.map((m: UserData) => {
+                const unpaidPurchases = approvedPurchases.filter((p: PurchaseSlip) => p.merchantId === m.uid && p.payoutStatus !== 'paid');
+                const unpaidSets = unpaidPurchases.reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
+                const owedAmount = unpaidSets * (systemSettings.pricePerSet - systemSettings.platformFee);
+
+                return (
+                  <div key={m.uid} className="bg-slate-900 p-6 rounded-[2rem] border border-slate-800">
+                    <div className="flex items-center gap-4 mb-4">
+                      {m.storeImage ? <img src={m.storeImage} className="w-14 h-14 rounded-xl object-cover" alt="Store"/> : <div className="w-14 h-14 rounded-xl bg-slate-800 flex items-center justify-center"><StoreIcon size={24} className="text-slate-500"/></div>}
+                      <div className="flex-1">
+                        <p className="font-bold text-white text-lg">{m.storeName}</p>
+                        <p className="text-xs text-slate-400">{m.location}</p>
                       </div>
+                      <button onClick={() => setSelectedMerchantForDetails(m)} className="bg-white/10 p-2 rounded-lg hover:bg-white/20"><Info size={16}/></button>
                     </div>
-                  ) : (
-                    <button onClick={() => setPayingMerchant(mId)} className="w-full mt-2 bg-indigo-600/20 text-indigo-400 py-3 rounded-xl font-bold text-sm hover:bg-indigo-600/40">Mark as Paid</button>
-                  )}
-                </div>
-              ))
+                    
+                    <div className="bg-slate-800 p-4 rounded-2xl flex justify-between items-center mb-4">
+                       <div>
+                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">ค้างโอน (ยอดขาย: {unpaidSets} เซ็ต)</p>
+                         <p className="font-black text-2xl text-green-400">{owedAmount} ฿</p>
+                       </div>
+                       <button onClick={() => setPayingMerchant(m.uid)} className="bg-indigo-600 text-white px-5 py-3 rounded-xl font-bold text-xs shadow-md active:scale-95">โอนให้ร้านค้า</button>
+                    </div>
+                    
+                    {payingMerchant === m.uid && (
+                      <div className="bg-black/50 p-4 rounded-2xl mt-4 animate-in slide-in-from-top-2">
+                         <label className="w-full bg-slate-800 border border-slate-700 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer mb-4 hover:border-indigo-500">
+                          {payoutSlip ? <img src={payoutSlip} className="max-h-32 object-contain" alt="payout slip"/> : <><Upload size={20} className="text-slate-500 mb-2"/><span className="text-xs font-bold text-indigo-400">แนบสลิปโอนเงิน ({owedAmount}฿)</span></>}
+                          <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
+                             const f = e.target.files?.[0];
+                             if(f) compressImage(f, setPayoutSlip);
+                          }} />
+                        </label>
+                        <div className="flex gap-2">
+                          <button onClick={() => {setPayingMerchant(""); setPayoutSlip("");}} className="flex-1 bg-slate-800 text-slate-300 py-3 rounded-xl text-xs font-bold">ยกเลิก</button>
+                          <button onClick={() => executePayout(m.uid, unpaidPurchases, owedAmount)} disabled={!payoutSlip || isActionLoading || unpaidPurchases.length === 0} className="flex-1 bg-green-600 text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">ยืนยันการจ่าย</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             }
           </div>
         )}
 
+        {adminTab === 'users' && (
+          <div className="space-y-3 animate-in fade-in">
+            {studentAndGuests.map((u: any) => {
+              const pass = allPasses.find((p: any) => p.studentUid === u.uid);
+              return (
+                <div key={u.uid} className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center">
+                  <div className="truncate pr-2">
+                    <p className="font-bold text-sm text-white truncate">{u.displayName || u.email}</p>
+                    <p className="text-[10px] text-slate-500 uppercase mt-1">{u.role}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => handleEditCoupons(u.uid, pass?.id, pass?.remainingCoupons)}
+                      className="bg-indigo-600/20 text-indigo-400 px-4 py-2.5 rounded-xl text-xs font-bold hover:bg-indigo-600/40 border border-indigo-500/20"
+                    >
+                      {pass?.remainingCoupons || 0} CPN
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {adminTab === 'settings' && (
+          <div className="space-y-6 animate-in fade-in pb-10">
+            <div className="bg-slate-900 rounded-[2.5rem] p-8 border border-slate-800">
+              <h3 className="font-bold text-white mb-6 text-lg">Financial Setup</h3>
+              <div className="mb-6">
+                <p className="text-slate-400 text-xs font-bold mb-3 uppercase tracking-widest">ราคา 1 เซ็ต (5 คูปอง)</p>
+                <input type="number" value={pricePerSet} onChange={(e: any) => setPricePerSet(e.target.value)} 
+                  className="w-full bg-black/50 text-3xl font-black rounded-2xl p-5 outline-none border border-slate-700 focus:border-indigo-500 text-white text-center" />
+              </div>
+              <div className="mb-6">
+                <p className="text-slate-400 text-xs font-bold mb-3 uppercase tracking-widest">ส่วนแบ่งแพลตฟอร์ม (ต่อ 1 เซ็ต)</p>
+                <input type="number" value={platformFee} onChange={(e: any) => setPlatformFee(e.target.value)} 
+                  className="w-full bg-black/50 text-2xl font-black rounded-2xl p-5 outline-none border border-slate-700 focus:border-indigo-500 text-indigo-300 text-center" />
+              </div>
+              <div className="mb-8">
+                <p className="text-slate-400 text-xs font-bold mb-3 uppercase tracking-widest">PromptPay QR Code</p>
+                <label className="w-full bg-black/30 border border-slate-700 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer mb-4 hover:border-indigo-500 transition-colors">
+                  <Upload size={24} className="text-slate-500 mb-2"/>
+                  <span className="text-indigo-400 font-bold text-xs uppercase tracking-widest">Upload Image</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleQrUpload} />
+                </label>
+                {promptPayQr && <img src={promptPayQr} className="max-h-48 mx-auto rounded-2xl border border-slate-700 mb-4" alt="QR Preview" />}
+              </div>
+              <button onClick={saveSettings} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black active:scale-95 transition-all text-lg shadow-lg shadow-indigo-900/20">Save Settings</button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Modal for Merchant Details */}
+      {selectedMerchantForDetails && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 w-full max-w-sm overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="relative h-48 bg-slate-800">
+               {selectedMerchantForDetails.storeImage ? <img src={selectedMerchantForDetails.storeImage} className="w-full h-full object-cover" alt="store" /> : <div className="w-full h-full flex items-center justify-center"><StoreIcon size={48} className="text-slate-600"/></div>}
+               <button onClick={()=>setSelectedMerchantForDetails(null)} className="absolute top-4 right-4 bg-black/50 p-2 rounded-full text-white backdrop-blur-md hover:bg-black/70"><X size={20}/></button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <h2 className="text-2xl font-black text-white mb-1">{selectedMerchantForDetails.storeName}</h2>
+              <p className="text-slate-400 text-sm mb-6 flex items-center gap-1"><MapPin size={14}/> {selectedMerchantForDetails.location} ({selectedMerchantForDetails.category})</p>
+              
+              <div className="space-y-4 bg-black/40 p-5 rounded-2xl">
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">เจ้าของร้าน</p>
+                  <p className="text-sm font-medium text-slate-200">{selectedMerchantForDetails.ownerName}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">ข้อมูลธนาคาร</p>
+                  <p className="text-sm font-medium text-slate-200">{selectedMerchantForDetails.bankName}</p>
+                  <p className="text-lg font-mono text-indigo-400 mt-1">{selectedMerchantForDetails.bankAccount}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">การติดต่อ</p>
+                  <p className="text-sm font-medium text-slate-200">{selectedMerchantForDetails.email}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">รหัสร้านค้า (Shop ID)</p>
+                  <p className="text-[10px] font-mono text-slate-500 break-all select-all">{selectedMerchantForDetails.uid}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -828,6 +993,23 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
   const activePasses = myPasses.filter((p: Pass) => p.remainingCoupons > 0);
   const totalCoupons = activePasses.reduce((sum: number, p: Pass) => sum + p.remainingCoupons, 0);
 
+  const handleReport = async () => {
+    const issue = prompt("ระบุปัญหาที่พบ หรือข้อเสนอแนะ:");
+    if(issue && issue.trim() !== "") {
+      try {
+        await addDoc(collection(getFirestore(), 'reports'), {
+          studentUid: user.uid, email: user.email, issue: issue.trim(), status: 'pending', createdAt: new Date().toISOString()
+        });
+        showToast("ส่งรายงานให้ผู้ดูแลระบบแล้วครับ", "success");
+      } catch (e) { showToast("ไม่สามารถส่งรายงานได้", "error"); }
+    }
+  };
+
+  const history = [
+    ...(myPurchases || []).map((p: any) => ({ ...p, type: 'purchase' as const, date: new Date(p.createdAt) })),
+    ...(myRedemptions || []).map((r: any) => ({ ...r, type: 'redemption' as const, date: new Date(r.redeemedAt) }))
+  ].sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
+
   return (
     <div className="flex flex-col h-screen bg-[#F9FAFB] max-w-md mx-auto w-full relative">
       <Header title="My Wallet" subtitle={userData?.role} user={user} userData={userData} onLogout={onLogout} onEditName={onEditName} showToast={showToast} color="indigo" />
@@ -835,7 +1017,7 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
       <div className="flex-1 overflow-y-auto px-5 pt-6 pb-12 space-y-6 z-10 relative">
         
         {pendingPurchase && (
-          <div className="bg-amber-100 rounded-3xl p-5 text-center border border-amber-200 flex items-center justify-between">
+          <div className="bg-amber-100 rounded-3xl p-5 text-center border border-amber-200 flex items-center justify-between shadow-sm">
              <div className="flex items-center gap-3">
                <Clock className="text-amber-500 animate-spin-slow" size={24} />
                <div className="text-left">
@@ -876,7 +1058,7 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
                 return (
                   <div key={p.id} className="bg-white p-4 rounded-2xl flex justify-between items-center border border-slate-100 shadow-sm">
                     <div className="flex items-center gap-3">
-                      <div className="bg-orange-50 text-orange-500 p-2 rounded-xl"><Store size={18}/></div>
+                      <div className="bg-orange-50 text-orange-500 p-2 rounded-xl"><StoreIcon size={18}/></div>
                       <p className="font-bold text-sm text-slate-800">{storeName}</p>
                     </div>
                     <div className="text-right">
@@ -889,13 +1071,42 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
             </div>
           </div>
         )}
+
+        {/* History Log */}
+        <div className="pt-4">
+          <div className="flex justify-between items-center mb-4 px-2">
+            <h3 className="font-bold text-slate-800 text-sm">ประวัติล่าสุด</h3>
+            <button onClick={handleReport} className="text-xs font-bold text-red-400 hover:text-red-600 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-lg"><AlertTriangle size={12}/> รายงานปัญหา</button>
+          </div>
+          <div className="space-y-3">
+            {history.length === 0 ? (
+              <p className="text-center text-slate-400 text-xs py-8 bg-white rounded-3xl border border-slate-100 shadow-sm">ยังไม่มีรายการทำธุรกรรม</p>
+            ) : history.slice(0,5).map((h: any, idx: number) => (
+              <div key={idx} className="bg-white p-5 rounded-[2rem] flex justify-between items-center border border-slate-100 shadow-sm">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${h.type === 'purchase' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-600'}`}>
+                    {h.type === 'purchase' ? <ArrowDownLeft size={20}/> : <ArrowUpRight size={20}/>}
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-slate-800">{h.type === 'purchase' ? 'ซื้อคูปอง' : 'ใช้คูปอง'}</p>
+                    <p className="text-[10px] text-slate-400">{h.date.toLocaleDateString()} {h.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                  </div>
+                </div>
+                <p className={`font-black text-lg ${h.type === 'purchase' ? 'text-indigo-600' : 'text-slate-800'}`}>
+                  {h.type === 'purchase' ? `+${h.numSets * 5}` : `-${h.couponsUsed}`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
     </div>
   );
 }
 
 /* ==================== MERCHANT DASHBOARD ==================== */
-function MerchantDashboardView({ user, userData, redemptions, merchantPayouts, onLogout, showToast, onEditName }: any) {
+function MerchantDashboardView({ user, userData, redemptions, merchantSales, merchantPayouts, systemSettings, onLogout, showToast, onEditName }: any) {
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${user?.uid}&margin=10`;
 
   const togglePause = async () => {
@@ -903,53 +1114,85 @@ function MerchantDashboardView({ user, userData, redemptions, merchantPayouts, o
     showToast(userData?.isPaused ? "เปิดรับออเดอร์แล้ว" : "ปิดรับออเดอร์ชั่วคราวแล้ว", "info");
   };
 
+  const totalSetsSold = merchantSales.reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
+  const totalUnpaidSets = merchantSales.filter((p: PurchaseSlip) => p.payoutStatus !== 'paid').reduce((sum: number, p: PurchaseSlip) => sum + p.numSets, 0);
+  const amountOwed = totalUnpaidSets * (systemSettings.pricePerSet - systemSettings.platformFee);
+
+  const downloadQR = async () => {
+    try {
+      const response = await fetch(qrCodeUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `MFUPass_StoreQR_${userData?.storeName || 'Shop'}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast("ดาวน์โหลด QR Code แล้ว", "success");
+    } catch (e) {
+      window.open(qrCodeUrl, "_blank");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex flex-col font-sans w-full pb-12 max-w-md mx-auto relative">
-      <Header title="Shop Center" subtitle={userData?.storeName || "Shop"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
+      <Header title="Shop Center" subtitle={userData?.storeName || "Shop Console"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
       
       <div className="px-5 flex-1 w-full pt-6 space-y-6 animate-in slide-in-from-bottom-4 relative z-10">
         {!userData?.isApproved ? (
-           <div className="bg-white text-center p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+           <Card className="text-center py-16 border-4 border-dashed border-orange-200 shadow-orange-100">
              <Clock className="mx-auto text-orange-400 mb-6 animate-pulse" size={64}/>
-             <h3 className="text-xl font-black text-slate-800 mb-2">รออนุมัติ</h3>
-             <p className="text-slate-500 text-xs">แอดมินกำลังตรวจสอบข้อมูลร้านค้า</p>
-           </div>
+             <h3 className="text-2xl font-black text-slate-800 mb-2">รออนุมัติเปิดร้าน</h3>
+             <p className="text-slate-500 text-sm px-4 leading-relaxed">แอดมินกำลังตรวจสอบข้อมูลร้านค้าของคุณ</p>
+           </Card>
         ) : (
           <>
-            <div className="bg-white text-center p-8 rounded-[2.5rem] shadow-sm border border-slate-100 relative overflow-hidden flex flex-col items-center">
-              <div className="w-full flex justify-between items-center mb-4">
-                <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest relative z-10">รับคูปองแล้ววันนี้</p>
+            <Card className="text-center p-8 shadow-orange-100/60 mb-6 border-none relative overflow-hidden">
+              <div className="absolute -top-10 -left-10 w-40 h-40 bg-orange-100 rounded-full blur-3xl opacity-50"></div>
+              <div className="w-full flex justify-between items-center mb-4 relative z-10">
+                <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">พาสที่ขายได้ทั้งหมด</p>
                 <button onClick={togglePause} className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-1 ${userData.isPaused ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                   <Power size={14}/> {userData.isPaused ? 'ร้านปิด (Pause)' : 'ร้านเปิด'}
                 </button>
               </div>
-              <div className="text-[7rem] font-black leading-none text-orange-500 mb-6 relative z-10">{redemptions.filter((r: Redemption) => new Date(r.redeemedAt).toDateString() === new Date().toDateString()).length}</div>
-              <div className="w-full bg-orange-50 py-4 rounded-2xl border border-orange-100 relative z-10">
-                <p className="text-orange-500 text-[10px] font-black uppercase tracking-widest mb-1">ยอดค้างจ่ายจากระบบ (รันออโต้)</p>
-                <p className="text-3xl font-black text-orange-600">{redemptions.filter((r: Redemption) => r.payoutStatus !== 'paid').reduce((sum: number, r: Redemption) => sum + r.amount, 0)} ฿</p>
+              <div className="text-[6rem] font-black leading-none text-orange-500 mb-6 relative z-10">{totalSetsSold}</div>
+              <div className="bg-orange-50 py-5 rounded-2xl border border-orange-100 shadow-inner relative z-10">
+                <p className="text-orange-400 text-[10px] font-black uppercase tracking-widest mb-1">ยอดค้างจ่ายจากระบบ</p>
+                <p className="text-4xl font-black text-orange-600">{amountOwed} <span className="text-xl">฿</span></p>
               </div>
-            </div>
+            </Card>
 
-            <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col items-center text-center">
-               <p className="text-slate-800 font-black text-sm mb-4">QR Code สำหรับรับสิทธิ์</p>
-               <img src={qrCodeUrl} className="w-40 h-40 object-contain rounded-xl mb-4" alt="Store QR" />
+            <div className="bg-white rounded-[2.5rem] p-8 border-2 border-dashed border-orange-200 shadow-sm flex flex-col items-center text-center mb-8">
+               <p className="text-slate-700 font-black text-lg mb-2">QR Code สำหรับรับสิทธิ์</p>
+               <p className="text-slate-400 text-xs mb-6">ให้นักศึกษาสแกน QR นี้เพื่อใช้คูปองที่ร้านคุณ</p>
+               <div className="bg-white p-4 rounded-3xl shadow-xl border border-slate-100 mb-6">
+                 <img src={qrCodeUrl} className="w-48 h-48 object-contain rounded-xl" alt="Store QR" />
+               </div>
+               <button onClick={downloadQR} className="bg-orange-100 text-orange-600 font-bold py-3 px-8 rounded-full flex items-center gap-2 hover:bg-orange-200 active:scale-95 transition-all text-sm shadow-sm">
+                 <Download size={18} /> ดาวน์โหลดภาพ QR Code
+               </button>
             </div>
 
             <div>
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">ประวัติการรับเงินโอนจากระบบ (Payouts)</h3>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">ประวัติการใช้คูปองวันนี้</h3>
               <div className="space-y-3">
-                {merchantPayouts.length === 0 ? <p className="text-xs text-slate-400 text-center py-6 bg-white rounded-3xl border border-slate-100">ยังไม่มีรอบบิลจ่ายเงิน</p> : merchantPayouts.map((p: Payout) => (
-                  <div key={p.id} className="bg-white p-5 rounded-[2rem] flex flex-col shadow-sm border border-slate-100">
-                    <div className="flex justify-between items-center mb-3">
-                      <div>
-                        <p className="text-sm font-bold text-slate-800">รอบบิลชำระแล้ว</p>
-                        <p className="text-[10px] text-slate-400">{new Date(p.paidAt).toLocaleDateString()}</p>
+                {redemptions.filter((r: Redemption) => new Date(r.redeemedAt).toDateString() === new Date().toDateString()).length === 0 ? (
+                  <p className="text-slate-400 text-sm italic text-center py-4 bg-white rounded-2xl border border-slate-100">ยังไม่มีรายการวันนี้</p>
+                ) : (
+                  redemptions.filter((r: Redemption) => new Date(r.redeemedAt).toDateString() === new Date().toDateString()).map((r: Redemption, idx: number) => (
+                    <div key={idx} className="bg-white p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-green-100 p-2 rounded-full text-green-600"><Ticket size={16}/></div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">ใช้คูปอง {r.couponsUsed} ใบ</p>
+                          <p className="text-[10px] text-slate-400">{new Date(r.redeemedAt).toLocaleTimeString('th-TH')}</p>
+                        </div>
                       </div>
-                      <p className="font-black text-green-600 text-lg">+{p.amount} ฿</p>
                     </div>
-                    <img src={p.slipUrl} className="w-full h-32 object-cover rounded-xl bg-slate-50 border border-slate-100" onClick={()=>window.open(p.slipUrl)} alt="slip"/>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </>
@@ -969,6 +1212,14 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
 
   const availableMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved && !u.isPaused);
 
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if(!file.type.startsWith('image/')) return showToast('กรุณาอัปโหลดรูปภาพเท่านั้น', 'error');
+      compressImage(file, setSlip);
+    }
+  };
+
   const handleConfirm = async () => {
     if (!selectedMerchant) return showToast("กรุณาเลือกร้านค้าก่อน", "error");
     if (!slip) return showToast("กรุณาอัปโหลดสลิปยืนยัน", "error");
@@ -976,7 +1227,7 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
     try {
       await addDoc(collection(getFirestore(), 'purchases'), {
         studentUid: user.uid,
-        merchantId: selectedMerchant,
+        merchantId: selectedMerchant, // Feature 1
         numSets,
         totalAmount,
         slipUrl: slip,
@@ -1038,10 +1289,7 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
             {slip ? <img src={slip} className="w-full h-full object-cover" alt="slip" /> : (
               <div className="text-center"><Upload size={32} className="text-indigo-300 mx-auto mb-2" /><p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">อัปโหลดสลิปที่นี่</p></div>
             )}
-            <input type="file" accept="image/*" className="hidden" onChange={(e: any)=>{
-              const f = e.target.files?.[0];
-              if(f) compressImage(f, setSlip);
-            }} />
+            <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
           </label>
         </div>
       </div>
@@ -1055,8 +1303,9 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
 
 /* ==================== SCAN QR VIEW ==================== */
 function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess, showToast }: any) {
+  const [selectedPassId, setSelectedPassId] = useState("");
   const [shopId, setShopId] = useState("");
-  const [useCount, setUseCount] = useState(1);
+  const [useCount, setUseCount] = useState(1); 
   const [isScanning, setIsScanning] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -1098,12 +1347,23 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
   }, [isScanning]);
 
   const handleRedeem = async () => {
+    if (!selectedPassId) return showToast("กรุณาเลือกร้านค้าที่จะใช้พาสก่อน", "error");
+    
     const cleanShopId = shopId.trim();
-    if (!cleanShopId) return showToast("กรุณาระบุ Shop ID", "error");
+    if (!cleanShopId) return showToast("กรุณาระบุ Shop ID หรือ สแกน QR", "error");
 
-    const targetPass = myPasses.find((p: Pass) => p.merchantId === cleanShopId && p.remainingCoupons >= useCount);
-    if (!targetPass) return showToast("คุณไม่มีคูปองสำหรับร้านนี้ หรือคูปองไม่พอ", "error");
+    const targetPass = myPasses.find((p: Pass) => p.id === selectedPassId);
+    if (!targetPass) return showToast("ไม่พบพาสของคุณ", "error");
 
+    if (cleanShopId !== targetPass.merchantId) {
+      return showToast("พาสนี้ไม่สามารถใช้กับร้านค้านี้ได้ กรุณาตรวจสอบให้ตรงกัน", "error");
+    }
+
+    if (targetPass.remainingCoupons < useCount) {
+      return showToast("คูปองไม่เพียงพอ", "error");
+    }
+
+    // Cooldown Check
     const lastRedemption = myRedemptions.filter((r: Redemption) => r.merchantId === cleanShopId).sort((a: Redemption, b: Redemption) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime())[0];
     if (lastRedemption) {
       const diffMins = (new Date().getTime() - new Date(lastRedemption.redeemedAt).getTime()) / 60000;
@@ -1128,7 +1388,7 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
     } finally { setIsProcessing(false); }
   };
 
-  const storeInfo = allUsers.find((u: UserData) => u.uid === shopId);
+  const passesForSelection = myPasses.filter((p: Pass) => p.remainingCoupons >= useCount);
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col items-center justify-center max-w-md mx-auto font-sans relative overflow-y-auto pb-10">
@@ -1139,14 +1399,25 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
       <div className="w-full mt-16 animate-in slide-in-from-bottom-8 duration-500">
         <h2 className="text-3xl font-black mb-6 italic tracking-tighter text-center text-indigo-400">Scan to Pay</h2>
         
+        <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 mb-6 shadow-xl">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">1. เลือกร้านที่จะใช้คูปอง</p>
+          <select value={selectedPassId} onChange={e => setSelectedPassId(e.target.value)} className="w-full bg-black/50 text-sm font-bold p-4 rounded-xl border border-slate-700 outline-none focus:border-indigo-500 text-indigo-300">
+            <option value="">-- เลือกร้านค้า --</option>
+            {passesForSelection.map((p: Pass) => {
+              const storeName = allUsers.find((u: UserData) => u.uid === p.merchantId)?.storeName || 'Unknown Store';
+              return <option key={p.id} value={p.id}>{storeName} (มี {p.remainingCoupons} ใบ)</option>
+            })}
+          </select>
+        </div>
+
         <div className={`w-full aspect-square bg-black rounded-[3rem] relative overflow-hidden flex items-center justify-center border border-slate-800 shadow-2xl mb-6 ${isScanning ? 'border-indigo-500 shadow-[0_0_60px_rgba(99,102,241,0.3)]' : ''}`}>
           {isScanning ? (
             <div id="qr-reader" className="w-full h-full bg-black absolute inset-0"></div>
           ) : (
             <div className="text-center">
               <Camera size={60} className="text-slate-700 mx-auto mb-4" />
-              <button onClick={() => setIsScanning(true)} className="bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-sm active:scale-95 flex items-center gap-2 mx-auto">
-                <ScanLine size={18} /> เปิดกล้อง
+              <button onClick={() => setIsScanning(true)} disabled={!selectedPassId} className="bg-indigo-600 text-white px-8 py-4 rounded-full font-black text-sm active:scale-95 flex items-center gap-2 mx-auto disabled:opacity-50">
+                <ScanLine size={18} /> เปิดกล้องสแกน
               </button>
             </div>
           )}
@@ -1160,26 +1431,20 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
           </div>
         )}
 
-        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800">
-          <input type="text" placeholder="หรือพิมพ์ SHOP ID" value={shopId} onChange={(e: any) => setShopId(e.target.value)}
+        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl">
+          <input type="text" placeholder="หรือพิมพ์ SHOP ID ที่นี่" value={shopId} onChange={(e: any) => setShopId(e.target.value)}
             className="w-full bg-black/50 text-center text-xl font-mono p-4 rounded-2xl outline-none focus:border-indigo-500 transition-all uppercase mb-4 border border-slate-800 text-indigo-300" />
           
-          {storeInfo && (
-            <div className="bg-indigo-900/30 border border-indigo-500/30 p-3 rounded-xl mb-4 text-center">
-              <p className="text-xs text-indigo-300 font-bold">กำลังจะจ่ายให้: {storeInfo.storeName}</p>
-            </div>
-          )}
-
           <div className="flex items-center justify-between bg-black/30 p-2 rounded-2xl mb-6 border border-slate-800">
-             <span className="text-xs font-bold text-slate-400 pl-4">จำนวนคูปอง:</span>
+             <span className="text-xs font-bold text-slate-400 pl-4">ใช้กี่คูปอง?:</span>
              <div className="flex bg-slate-800 rounded-xl">
                <button onClick={()=>setUseCount(1)} className={`px-5 py-2 rounded-xl text-sm font-bold transition-all ${useCount===1?'bg-indigo-600 text-white':'text-slate-400'}`}>1</button>
                <button onClick={()=>setUseCount(2)} className={`px-5 py-2 rounded-xl text-sm font-bold transition-all ${useCount===2?'bg-indigo-600 text-white':'text-slate-400'}`}>2</button>
              </div>
           </div>
 
-          <button onClick={handleRedeem} disabled={!shopId || isProcessing} className="w-full bg-indigo-600 py-4 rounded-2xl font-black text-lg active:scale-95 disabled:opacity-50">
-            {isProcessing ? <Loader2 className="animate-spin mx-auto" size={24}/> : `ยืนยันจ่าย ${useCount} คูปอง`}
+          <button onClick={handleRedeem} disabled={!shopId || !selectedPassId || isProcessing} className="w-full bg-indigo-600 py-4 rounded-2xl font-black text-lg active:scale-95 disabled:opacity-50">
+            {isProcessing ? <Loader2 className="animate-spin mx-auto" size={24}/> : `ยืนยันใช้ ${useCount} คูปอง`}
           </button>
         </div>
       </div>
