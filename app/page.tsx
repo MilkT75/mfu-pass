@@ -178,7 +178,7 @@ export default function MFUPassApp() {
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser: any) => {
       setUser(currentUser);
       if (currentUser) {
         if (currentUser.email === ADMIN_EMAIL) {
@@ -212,7 +212,7 @@ export default function MFUPassApp() {
     const db = getFirestore();
     const unsubs: (() => void)[] = [];
 
-    unsubs.push(onSnapshot(doc(db, 'settings', 'global'), (snap) => {
+    unsubs.push(onSnapshot(doc(db, 'settings', 'global'), (snap: any) => {
       if (snap.exists()) {
         const data = snap.data() as AppSettings;
         setSystemSettings({
@@ -224,41 +224,41 @@ export default function MFUPassApp() {
     }));
 
     if (['student', 'guest'].includes(currentView) || currentView === 'buy_pass' || currentView === 'scan_qr') {
-      unsubs.push(onSnapshot(collection(db, 'passes'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'passes'), (snap: any) => {
         const passes = snap.docs.filter((d: any) => d.data().studentUid === user.uid).map((d: any) => ({id: d.id, ...d.data()} as Pass));
         setMyPasses(passes);
       }));
 
-      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap: any) => {
         const purchases = snap.docs.filter((d: any) => d.data().studentUid === user.uid).map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip));
         setMyPurchases(purchases);
         const pending = purchases.find((p: PurchaseSlip) => p.status === 'pending');
         setPendingPurchase(pending || null);
       }));
 
-      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap: any) => {
         const reds = snap.docs.filter((d: any) => d.data().studentUid === user.uid).map((d: any) => ({ id: d.id, ...d.data() } as Redemption));
         setMyRedemptions(reds);
       }));
 
-      unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'users'), (snap: any) => {
         setAllUsers(snap.docs.map((d: any) => ({ uid: d.id, ...d.data() } as UserData)));
       }));
     }
 
     if (currentView === 'merchant') {
-      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap: any) => {
         const filtered = snap.docs.filter((d: any) => d.data().merchantId === user.uid).map((d: any) => ({ id: d.id, ...d.data() } as Redemption));
         filtered.sort((a: Redemption, b: Redemption) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime());
         setRedemptions(filtered);
       }));
 
-      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap: any) => {
         const sales = snap.docs.filter((d: any) => d.data().merchantId === user.uid && d.data().status === 'approved').map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip));
         setMerchantSales(sales);
       }));
 
-      unsubs.push(onSnapshot(collection(db, 'payouts'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'payouts'), (snap: any) => {
         const filtered = snap.docs.filter((d: any) => d.data().merchantId === user.uid).map((d: any) => ({ id: d.id, ...d.data() } as Payout));
         filtered.sort((a: Payout, b: Payout) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
         setMerchantPayouts(filtered);
@@ -266,29 +266,29 @@ export default function MFUPassApp() {
     }
 
     if (currentView === 'admin') {
-      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'purchases'), (snap: any) => {
         setAllPurchases(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip)));
       }));
-      unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'users'), (snap: any) => {
         setAllUsers(snap.docs.map((d: any) => ({ uid: d.id, ...d.data() } as UserData)));
       }));
-      unsubs.push(onSnapshot(collection(db, 'passes'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'passes'), (snap: any) => {
         setAllPasses(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Pass)));
       }));
-      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap: any) => {
         setAllRedemptions(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Redemption)));
       }));
-      unsubs.push(onSnapshot(collection(db, 'payouts'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'payouts'), (snap: any) => {
         setAllPayouts(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Payout)));
       }));
-      unsubs.push(onSnapshot(collection(db, 'reports'), (snap) => {
+      unsubs.push(onSnapshot(collection(db, 'reports'), (snap: any) => {
         const reports = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as ReportIssue));
         reports.sort((a: ReportIssue, b: ReportIssue) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setAllReports(reports);
       }));
     }
 
-    unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap) => {
+    unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap: any) => {
       if (snap.exists()) setUserData(snap.data() as UserData);
     }));
 
@@ -334,7 +334,7 @@ export default function MFUPassApp() {
       await sendPasswordResetEmail(getAuth(), email);
       showToast("ส่งลิงก์รีเซ็ตรหัสผ่านไปที่อีเมลแล้ว", "success");
       setAuthMode('login');
-    } catch (e) {
+    } catch (e: any) {
       showToast("ไม่พบอีเมลนี้ในระบบ", "error");
     }
   };
@@ -387,7 +387,7 @@ export default function MFUPassApp() {
 
   if (!isAppReady) {
     return (
-      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center w-full">
         <Ticket className="w-12 h-12 animate-pulse text-indigo-600 mb-4" />
         <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
       </div>
@@ -395,7 +395,8 @@ export default function MFUPassApp() {
   }
 
   return (
-    <div className="relative bg-slate-200 min-h-screen font-sans text-slate-800 flex items-center justify-center sm:py-8">
+    <div className="min-h-screen sm:h-screen sm:min-h-0 w-full bg-slate-200 flex items-center justify-center font-sans text-slate-800 sm:p-6">
+      
       {/* Toast Notification */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-6 fade-in w-max max-w-[90%]">
@@ -409,11 +410,11 @@ export default function MFUPassApp() {
         </div>
       )}
 
-      {/* Adaptive Mobile/Desktop Wrapper */}
-      <div className="w-full max-w-md bg-[#F9FAFB] min-h-screen sm:min-h-[850px] sm:h-[90vh] sm:rounded-[3rem] sm:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] relative overflow-hidden sm:border-[8px] sm:border-slate-800 flex flex-col">
+      {/* Adaptive Mobile/Desktop Wrapper (Mobile Mockup on Desktop) */}
+      <div className="w-full h-full min-h-screen sm:min-h-0 sm:max-h-[850px] sm:max-w-[400px] bg-[#F9FAFB] sm:rounded-[3rem] sm:shadow-2xl sm:border-[8px] sm:border-slate-800 relative flex flex-col overflow-hidden mx-auto">
         
-        {/* Scrollable View Area */}
-        <div className="flex-1 overflow-x-hidden overflow-y-auto bg-[#F9FAFB]">
+        {/* Main Content Area */}
+        <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden bg-[#F9FAFB] relative flex flex-col scrollbar-hide">
           {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} user={user} />}
           
           {currentView === 'admin' && <AdminDashboardView 
@@ -518,7 +519,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
 
   if (authMode === 'forgot_password') {
     return (
-      <div className="min-h-full flex flex-col items-center justify-center p-6 bg-white">
+      <div className="w-full h-full min-h-full flex flex-col items-center justify-center p-6 bg-white">
         <div className="w-full animate-in fade-in duration-500">
            <h2 className="text-3xl font-black mb-2 text-slate-900">รีเซ็ตรหัสผ่าน</h2>
            <p className="text-sm text-slate-500 mb-8">ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่อีเมลของคุณ</p>
@@ -531,11 +532,11 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
   }
 
   return (
-    <div className="min-h-full flex flex-col items-center justify-center p-6 bg-white">
+    <div className="w-full h-full min-h-full flex flex-col items-center justify-center p-6 bg-white relative">
       <div className="w-full animate-in fade-in duration-700 pb-10">
         
         {authMode !== 'merchant_setup' && (
-          <div className="flex flex-col items-center mb-8">
+          <div className="flex flex-col items-center mb-8 pt-10">
             <div className="w-20 h-20 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-lg shadow-indigo-200 mb-6 rotate-3">
               <Ticket size={40} className="text-white" />
             </div>
@@ -557,7 +558,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
             </div>
           </div>
         ) : authMode === 'merchant_setup' ? (
-          <form onSubmit={handleMerchantSubmit} className="space-y-4 animate-in slide-in-from-right-4 max-h-[85vh] overflow-y-auto pb-10 px-2 scrollbar-hide">
+          <form onSubmit={handleMerchantSubmit} className="space-y-4 animate-in slide-in-from-right-4 pt-10 pb-10 px-2">
             <div className="text-center mb-4">
               <h2 className="text-2xl font-black text-slate-800">ข้อมูลร้านค้าพาร์ทเนอร์</h2>
             </div>
@@ -585,7 +586,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
 
             <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 mt-4">
               <label className="flex items-start gap-3 cursor-pointer">
-                <input type="checkbox" checked={acceptedPolicy} onChange={(e: any) => setAcceptedPolicy(e.target.checked)} className="mt-1" />
+                <input type="checkbox" checked={acceptedPolicy} onChange={(e: any) => setAcceptedPolicy(e.target.checked)} className="mt-1 shrink-0" />
                 <span className="text-[10px] text-orange-900 leading-tight">ข้าพเจ้ายินยอมให้หักค่าธรรมเนียมแพลตฟอร์ม, รับโอนเงินรายสัปดาห์, และยอมรับเงื่อนไขทางกฎหมายหากพบการทุจริต</span>
               </label>
             </div>
@@ -597,18 +598,22 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
           </form>
         ) : (
           <>
+            {/* Student Notice Banner */}
+            <div className="w-full mb-6 animate-in fade-in">
+              <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-2xl flex gap-3 shadow-sm items-start">
+                <AlertTriangle className="text-indigo-500 shrink-0 mt-0.5" size={20} />
+                <div className="text-left text-xs text-indigo-800 leading-relaxed">
+                  <span className="font-bold block mb-0.5">สำหรับนักศึกษา:</span>
+                  โปรดสมัครหรือเข้าสู่ระบบด้วยอีเมล <span className="font-mono bg-indigo-100 px-1 rounded">@lamduan.mfu.ac.th</span> เท่านั้น
+                </div>
+              </div>
+            </div>
+
             {/* Google Sign-In */}
-            <button onClick={onGoogleAuth} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-4 active:scale-95">
+            <button onClick={onGoogleAuth} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-6 active:scale-95">
               <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Sign in with Google
             </button>
-
-            {/* Student Notice */}
-            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-6 text-center">
-              <p className="text-[11px] text-indigo-600">
-                <span className="font-bold">สำหรับนักศึกษา:</span> โปรดเข้าสู่ระบบด้วยอีเมล <span className="font-mono">@lamduan.mfu.ac.th</span> เท่านั้น
-              </p>
-            </div>
 
             <div className="flex items-center gap-4 mb-6">
               <div className="h-px bg-slate-200 flex-1"></div>
@@ -763,7 +768,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   };
 
   return (
-    <div className="flex flex-col min-h-full bg-slate-950 text-white">
+    <div className="flex flex-col h-full min-h-full w-full bg-slate-950 text-white pb-10">
       <Header title="Admin Console" subtitle="System Control" onLogout={onLogout} user={user} userData={userData} onEditName={onEditName} color="slate" showToast={showToast} />
       
       <div className="px-6 pt-2 pb-2 flex gap-2 overflow-x-auto scrollbar-hide bg-slate-950 shrink-0">
@@ -774,7 +779,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
         <TabButton active={adminTab==='settings'} onClick={()=>setAdminTab('settings')} label="Settings" dark />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 p-6 space-y-6">
         
         {adminTab === 'overview' && (
           <div className="space-y-6 animate-in fade-in">
@@ -979,7 +984,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
       {selectedMerchantForDetails && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 w-full max-w-sm overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="relative h-48 bg-slate-800">
+            <div className="relative h-48 bg-slate-800 shrink-0">
                {selectedMerchantForDetails.storeImage ? <img src={selectedMerchantForDetails.storeImage} className="w-full h-full object-cover" alt="store" /> : <div className="w-full h-full flex items-center justify-center"><StoreIcon size={48} className="text-slate-600"/></div>}
                <button onClick={()=>setSelectedMerchantForDetails(null)} className="absolute top-4 right-4 bg-black/50 p-2 rounded-full text-white backdrop-blur-md hover:bg-black/70"><X size={20}/></button>
             </div>
@@ -1052,10 +1057,10 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
   ].sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
 
   return (
-    <div className="flex flex-col min-h-full bg-[#F9FAFB] relative">
+    <div className="flex flex-col h-full min-h-full w-full bg-[#F9FAFB] relative">
       <Header title="My Wallet" subtitle={userData?.role} user={user} userData={userData} onLogout={onLogout} onEditName={onEditName} showToast={showToast} color="indigo" />
       
-      <div className="flex-1 overflow-y-auto px-5 pt-6 pb-12 space-y-6 z-10 relative">
+      <div className="flex-1 p-6 space-y-6">
         
         {pendingPurchase && (
           <div className="bg-amber-100 rounded-3xl p-5 text-center border border-amber-200 flex items-center justify-between shadow-sm">
@@ -1114,7 +1119,7 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
         )}
 
         {/* History Log */}
-        <div className="pt-4">
+        <div className="pt-4 pb-10">
           <div className="flex justify-between items-center mb-4 px-2">
             <h3 className="font-bold text-slate-800 text-sm">ประวัติล่าสุด</h3>
             <button onClick={handleReport} className="text-xs font-bold text-red-400 hover:text-red-600 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-lg"><AlertTriangle size={12}/> รายงานปัญหา</button>
@@ -1181,10 +1186,10 @@ function MerchantDashboardView({ user, userData, redemptions, merchantSales, mer
   };
 
   return (
-    <div className="flex flex-col min-h-full bg-[#F9FAFB] relative">
+    <div className="flex flex-col h-full min-h-full w-full bg-[#F9FAFB] relative">
       <Header title="Shop Center" subtitle={userData?.storeName || "Shop Console"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
       
-      <div className="px-5 flex-1 w-full pt-6 space-y-6 animate-in slide-in-from-bottom-4 relative z-10">
+      <div className="flex-1 p-6 space-y-6">
         {!userData?.isApproved ? (
            <Card className="text-center py-16 border-4 border-dashed border-orange-200 shadow-orange-100">
              <Clock className="mx-auto text-orange-400 mb-6 animate-pulse" size={64}/>
@@ -1288,14 +1293,14 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
   };
 
   return (
-    <div className="flex flex-col min-h-full bg-white p-6 font-sans animate-in fade-in">
+    <div className="flex flex-col h-full min-h-full w-full bg-white p-6 font-sans animate-in fade-in">
       <div className="flex items-center justify-between mb-6 pt-4 shrink-0">
         <button onClick={onBack} className="p-3 bg-slate-50 rounded-2xl text-slate-600 hover:bg-slate-100 active:scale-90"><ChevronLeft size={20}/></button>
         <h2 className="text-2xl font-black text-slate-900 italic tracking-tighter">Buy Pass</h2>
         <div className="w-12"></div>
       </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto pb-6">
+      <div className="flex-1 space-y-5 pb-6">
         
         <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">1. เลือกร้านค้าที่จะใช้คูปอง</p>
@@ -1435,7 +1440,7 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
   const passesForSelection = myPasses.filter((p: Pass) => p.remainingCoupons >= useCount);
 
   return (
-    <div className="flex flex-col min-h-full bg-slate-950 text-white p-6 font-sans relative">
+    <div className="flex flex-col h-full min-h-full w-full bg-slate-950 text-white p-6 font-sans relative">
       <div className="absolute top-8 left-6 z-10">
         <button onClick={onBack} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90"><ChevronLeft size={24}/></button>
       </div>
@@ -1509,7 +1514,7 @@ function SuccessView({ onDone }: any) {
   }, []);
 
   return (
-    <div className="flex flex-col min-h-full bg-[#10b981] text-white items-center justify-center p-8 text-center animate-in fade-in duration-500 relative overflow-hidden">
+    <div className="flex flex-col min-h-full h-full w-full bg-[#10b981] text-white items-center justify-center p-8 text-center animate-in fade-in duration-500 relative overflow-hidden">
       <div className="bg-white/20 p-4 rounded-full mb-8 relative z-10">
         <div className="bg-white text-[#10b981] p-8 rounded-full shadow-2xl animate-bounce">
           <CheckCircle size={80} strokeWidth={3.5} />
