@@ -505,6 +505,16 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allReports, 
     showToast("บันทึกการตั้งค่าเรียบร้อยแล้ว", "success");
   };
 
+  const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if(!file.type.startsWith('image/')) return showToast('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น', 'error');
+      const reader = new FileReader();
+      reader.onloadend = () => setPromptPayQr(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleApproveSlip = async (slip: PurchaseSlip) => {
     try {
       const passQuery = query(collection(db, 'passes'), where('studentUid', '==', slip.studentUid));
@@ -562,10 +572,33 @@ function AdminDashboardView({ allPendingSlips, allUsers, allPasses, allReports, 
             className="w-full bg-black/50 text-4xl font-black text-center rounded-2xl p-5 outline-none border border-slate-700 focus:border-indigo-500" />
         </div>
         <div>
-          <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">PromptPay QR Code (URL)</p>
-          <textarea value={promptPayQr} onChange={(e: any) => setPromptPayQr(e.target.value)} rows={3}
-            className="w-full bg-black/50 rounded-2xl p-5 text-sm font-mono outline-none resize-none border border-slate-700 focus:border-indigo-500" placeholder="https://..." />
-          {promptPayQr && <img src={promptPayQr} className="mt-4 max-h-64 mx-auto rounded-2xl" alt="QR Preview" />}
+          <p className="text-slate-400 text-xs uppercase tracking-widest mb-3">PromptPay QR Code</p>
+          
+          <div className="flex flex-col gap-4">
+            <label className="w-full bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl p-4 flex items-center justify-center cursor-pointer transition-all">
+              <div className="flex items-center gap-3 text-indigo-300">
+                <Upload size={20} />
+                <span className="font-bold text-sm">อัปโหลดรูปภาพ QR Code</span>
+              </div>
+              <input type="file" accept="image/*" className="hidden" onChange={handleQrUpload} />
+            </label>
+
+            <div className="flex items-center gap-4 w-full">
+              <div className="h-px bg-slate-800 flex-1"></div>
+              <span className="text-slate-500 text-xs font-bold uppercase">หรือ</span>
+              <div className="h-px bg-slate-800 flex-1"></div>
+            </div>
+
+            <textarea value={promptPayQr} onChange={(e: any) => setPromptPayQr(e.target.value)} rows={2}
+              className="w-full bg-black/50 rounded-2xl p-4 text-sm font-mono outline-none resize-none border border-slate-700 focus:border-indigo-500 text-slate-300" placeholder="วางลิงก์ (URL) รูปภาพ QR Code ที่นี่..." />
+          </div>
+
+          {promptPayQr && (
+            <div className="mt-6 bg-white p-4 rounded-3xl inline-block w-full text-center shadow-sm">
+              <p className="text-slate-400 text-[10px] font-bold uppercase mb-2">QR Preview</p>
+              <img src={promptPayQr} className="max-h-48 mx-auto rounded-xl" alt="QR Preview" />
+            </div>
+          )}
         </div>
         <button onClick={saveSettings} className="w-full mt-8 bg-indigo-600 py-4 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-indigo-500 active:scale-95 transition-all">
           <Save size={20} /> บันทึกการตั้งค่า
@@ -899,13 +932,18 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
         </div>
       </Card>
 
-      {settings?.promptPayQr && (
-        <Card className="mb-6 p-8 text-center shadow-sm">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">สแกนเพื่อโอนเงิน</p>
-          <img src={settings.promptPayQr} className="w-full max-w-[200px] mx-auto rounded-3xl" alt="QR" />
-          <p className="mt-6 font-bold text-sm text-slate-600">MFU Pass Official Account</p>
-        </Card>
-      )}
+      <Card className="mb-6 p-8 text-center shadow-sm">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">สแกนเพื่อโอนเงิน</p>
+        {settings?.promptPayQr ? (
+          <img src={settings.promptPayQr} className="w-full max-w-[200px] mx-auto rounded-3xl shadow-sm" alt="QR" />
+        ) : (
+          <div className="w-full max-w-[200px] aspect-square mx-auto bg-slate-50 rounded-3xl flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200">
+            <QrCode size={48} className="mb-3 opacity-50" />
+            <p className="text-[10px] font-bold uppercase tracking-widest px-4">รอผู้ดูแลระบบ<br/>ตั้งค่า QR Code</p>
+          </div>
+        )}
+        <p className="mt-6 font-bold text-sm text-slate-600">MFU Pass Official Account</p>
+      </Card>
 
       <Card className="p-8 border border-slate-200">
         <p className="text-center font-black text-slate-700 mb-6">อัปโหลดสลิปยืนยัน</p>
