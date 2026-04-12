@@ -547,8 +547,8 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
         {authMode === 'role_setup' ? (
           <div className="space-y-4 animate-in slide-in-from-bottom-4">
             <p className="text-center text-slate-500 font-bold text-xs uppercase tracking-widest mb-6">เลือกบทบาทของคุณ</p>
-            <RoleButton icon={<User />} title="นักศึกษา" onClick={() => user ? onRoleSelect('student') : onGoogleAuth('student')} color="indigo" />
-            <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => user ? onRoleSelect('guest') : onGoogleAuth('guest')} color="blue" />
+            <RoleButton icon={<User />} title="นักศึกษา" onClick={() => user ? onRoleSelect('student') : onGoogleAuth()} color="indigo" />
+            <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => user ? onRoleSelect('guest') : onGoogleAuth()} color="blue" />
             <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setAuthMode('merchant_setup')} color="orange" />
             
             <div className="text-center mt-6 pt-4 border-t border-slate-100">
@@ -767,6 +767,57 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
     }
   };
 
+  const handleSystemReset = async (resetType: 'soft' | 'hard') => {
+    const isHard = resetType === 'hard';
+    const warningMsg = isHard 
+      ? "⚠️ คำเตือน (Hard Reset): ลบข้อมูลทุกอย่าง รวมถึง 'บัญชีผู้ใช้' ทุกคนต้องสมัครใหม่ (ยกเว้นแอดมิน) คุณแน่ใจหรือไม่?" 
+      : "⚠️ คำเตือน (Soft Reset): ลบเฉพาะข้อมูลธุรกรรม (คูปอง, สลิป, ประวัติ) แต่ 'เก็บบัญชีผู้ใช้ไว้' คุณแน่ใจหรือไม่?";
+      
+    const confirmReset = window.confirm(warningMsg);
+    if (!confirmReset) return;
+
+    const passCode = window.prompt("กรุณากรอกรหัสยืนยันการรีเซ็ตระบบ (6 หลัก):");
+    if (passCode !== "842019") {
+      showToast("รหัสยืนยันไม่ถูกต้อง ยกเลิกการทำรายการ", "error");
+      return;
+    }
+
+    setIsActionLoading(true);
+    try {
+      const clearCollection = async (colName: string) => {
+        const snap = await getDocs(collection(db, colName));
+        const promises = snap.docs.map((d: any) => deleteDoc(d.ref));
+        await Promise.all(promises);
+      };
+
+      // Clear all transactional data
+      await clearCollection('passes');
+      await clearCollection('purchases');
+      await clearCollection('redemptions');
+      await clearCollection('reports');
+      await clearCollection('payouts');
+
+      // Only clear users if Hard Reset
+      if (isHard) {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const userDeletePromises = usersSnap.docs.map((d: any) => {
+          if (d.data().email !== ADMIN_EMAIL) {
+            return deleteDoc(d.ref);
+          }
+          return Promise.resolve();
+        });
+        await Promise.all(userDeletePromises);
+        showToast("Hard Reset สำเร็จ: ล้างข้อมูลและบัญชีทั้งหมดแล้ว", "success");
+      } else {
+        showToast("Soft Reset สำเร็จ: ล้างข้อมูลธุรกรรมเรียบร้อยแล้ว", "success");
+      }
+    } catch (error) {
+      showToast("เกิดข้อผิดพลาดในการรีเซ็ตระบบ", "error");
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full min-h-full w-full bg-slate-950 text-white pb-10">
       <Header title="Admin Console" subtitle="System Control" onLogout={onLogout} user={user} userData={userData} onEditName={onEditName} color="slate" showToast={showToast} />
@@ -779,7 +830,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
         <TabButton active={adminTab==='settings'} onClick={()=>setAdminTab('settings')} label="Settings" dark />
       </div>
 
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
         {adminTab === 'overview' && (
           <div className="space-y-6 animate-in fade-in">
@@ -976,6 +1027,33 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
               </div>
               <button onClick={saveSettings} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black active:scale-95 transition-all text-lg shadow-lg shadow-indigo-900/20">Save Settings</button>
             </div>
+
+            {/* DANGER ZONE - 2 Options */}
+            <div className="bg-red-500/10 rounded-[2.5rem] p-8 border border-red-500/20 text-center">
+              <AlertTriangle className="text-red-500 mx-auto mb-4" size={40} />
+              <h3 className="font-black text-red-500 mb-2 text-xl">Danger Zone (รีเซ็ตระบบ)</h3>
+              
+              <div className="space-y-4 text-left mt-6">
+                {/* Soft Reset */}
+                <div className="bg-black/20 p-5 rounded-2xl border border-red-500/20">
+                  <h4 className="font-bold text-red-400 text-sm mb-1">1. Soft Reset (ล้างเฉพาะข้อมูล)</h4>
+                  <p className="text-xs text-slate-400 mb-4">ล้างคูปอง สลิป ประวัติทั้งหมด แต่ <span className="text-white font-bold">เก็บบัญชีผู้ใช้ไว้</span> ไม่ต้องสมัครใหม่</p>
+                  <button onClick={() => handleSystemReset('soft')} disabled={isActionLoading} className="w-full bg-red-600/30 hover:bg-red-600/50 text-red-300 font-bold py-3 rounded-xl active:scale-95 transition-all text-sm flex items-center justify-center gap-2 disabled:opacity-50 border border-red-500/30">
+                    {isActionLoading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />} Soft Reset
+                  </button>
+                </div>
+
+                {/* Hard Reset */}
+                <div className="bg-red-900/40 p-5 rounded-2xl border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                  <h4 className="font-bold text-red-400 text-sm mb-1">2. Hard Reset (ล้างทั้งหมด)</h4>
+                  <p className="text-xs text-red-300/80 mb-4">ล้างทุกอย่าง รวมถึง <span className="text-white font-bold">ลบบัญชีผู้ใช้ทั้งหมด</span> (ยกเว้นแอดมิน) ต้องสมัครใหม่</p>
+                  <button onClick={() => handleSystemReset('hard')} disabled={isActionLoading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl active:scale-95 transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-900/50 disabled:opacity-50">
+                    {isActionLoading ? <Loader2 className="animate-spin" size={18} /> : <Trash2 size={18} />} Hard Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
       </div>
