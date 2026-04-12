@@ -157,6 +157,7 @@ export default function MFUPassApp() {
   const [allPasses, setAllPasses] = useState<Pass[]>([]);
   const [allRedemptions, setAllRedemptions] = useState<Redemption[]>([]);
   const [allPayouts, setAllPayouts] = useState<Payout[]>([]);
+  const [allReports, setAllReports] = useState<ReportIssue[]>([]);
   
   // Merchant States
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
@@ -280,6 +281,11 @@ export default function MFUPassApp() {
       unsubs.push(onSnapshot(collection(db, 'payouts'), (snap) => {
         setAllPayouts(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Payout)));
       }));
+      unsubs.push(onSnapshot(collection(db, 'reports'), (snap) => {
+        const reports = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as ReportIssue));
+        reports.sort((a: ReportIssue, b: ReportIssue) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setAllReports(reports);
+      }));
     }
 
     unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap) => {
@@ -381,7 +387,7 @@ export default function MFUPassApp() {
 
   if (!isAppReady) {
     return (
-      <div className="min-h-screen bg-[#F9FAFB] flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center">
         <Ticket className="w-12 h-12 animate-pulse text-indigo-600 mb-4" />
         <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
       </div>
@@ -389,7 +395,7 @@ export default function MFUPassApp() {
   }
 
   return (
-    <div className="relative bg-[#F9FAFB] min-h-screen font-sans text-slate-800">
+    <div className="relative bg-slate-200 min-h-screen font-sans text-slate-800 flex items-center justify-center sm:py-8">
       {/* Toast Notification */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-6 fade-in w-max max-w-[90%]">
@@ -403,34 +409,40 @@ export default function MFUPassApp() {
         </div>
       )}
 
-      <div className="max-w-md mx-auto bg-[#F9FAFB] min-h-screen shadow-[0_0_40px_rgba(0,0,0,0.05)] relative overflow-x-hidden border-x border-slate-100">
-        {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} user={user} />}
+      {/* Adaptive Mobile/Desktop Wrapper */}
+      <div className="w-full max-w-md bg-[#F9FAFB] min-h-screen sm:min-h-[850px] sm:h-[90vh] sm:rounded-[3rem] sm:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] relative overflow-hidden sm:border-[8px] sm:border-slate-800 flex flex-col">
         
-        {currentView === 'admin' && <AdminDashboardView 
-          allPurchases={allPurchases} 
-          allUsers={allUsers} 
-          allPasses={allPasses}
-          allRedemptions={allRedemptions}
-          allPayouts={allPayouts}
-          systemSettings={systemSettings} 
-          onLogout={handleLogout} 
-          showToast={showToast} 
-          user={user} 
-          userData={userData} 
-          onEditName={handleEditName} 
-          setIsActionLoading={setIsActionLoading}
-          isActionLoading={isActionLoading}
-        />}
-        
-        {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} userData={userData} myPasses={myPasses} allUsers={allUsers} pendingPurchase={pendingPurchase} myPurchases={myPurchases} myRedemptions={myRedemptions} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} onEditName={handleEditName} />}
-        
-        {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} merchantSales={merchantSales} merchantPayouts={merchantPayouts} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
-        
-        {currentView === 'buy_pass' && <BuyPassView settings={systemSettings} allUsers={allUsers} onBack={() => setCurrentView(userData?.role || 'student')} user={user} showToast={showToast} />}
-        
-        {currentView === 'scan_qr' && <ScanQRView onBack={() => setCurrentView(userData?.role || 'student')} myPasses={myPasses} myRedemptions={myRedemptions} allUsers={allUsers} user={user} onSuccess={() => setCurrentView('success')} showToast={showToast} />}
-        
-        {currentView === 'success' && <SuccessView onDone={() => setCurrentView(userData?.role || 'student')} />}
+        {/* Scrollable View Area */}
+        <div className="flex-1 overflow-x-hidden overflow-y-auto bg-[#F9FAFB]">
+          {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} showToast={showToast} onGoogleAuth={handleGoogleAuth} onForgotPassword={handleForgotPassword} onLogout={handleLogout} user={user} />}
+          
+          {currentView === 'admin' && <AdminDashboardView 
+            allPurchases={allPurchases} 
+            allUsers={allUsers} 
+            allPasses={allPasses}
+            allRedemptions={allRedemptions}
+            allPayouts={allPayouts}
+            allReports={allReports}
+            systemSettings={systemSettings} 
+            onLogout={handleLogout} 
+            showToast={showToast} 
+            user={user} 
+            userData={userData} 
+            onEditName={handleEditName} 
+            setIsActionLoading={setIsActionLoading}
+            isActionLoading={isActionLoading}
+          />}
+          
+          {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} userData={userData} myPasses={myPasses} allUsers={allUsers} pendingPurchase={pendingPurchase} myPurchases={myPurchases} myRedemptions={myRedemptions} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} onEditName={handleEditName} />}
+          
+          {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} merchantSales={merchantSales} merchantPayouts={merchantPayouts} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
+          
+          {currentView === 'buy_pass' && <BuyPassView settings={systemSettings} allUsers={allUsers} onBack={() => setCurrentView(userData?.role || 'student')} user={user} showToast={showToast} />}
+          
+          {currentView === 'scan_qr' && <ScanQRView onBack={() => setCurrentView(userData?.role || 'student')} myPasses={myPasses} myRedemptions={myRedemptions} allUsers={allUsers} user={user} onSuccess={() => setCurrentView('success')} showToast={showToast} />}
+          
+          {currentView === 'success' && <SuccessView onDone={() => setCurrentView(userData?.role || 'student')} />}
+        </div>
       </div>
     </div>
   );
@@ -443,7 +455,7 @@ function Header({ title, subtitle, color = "indigo", onLogout, user, userData, s
   const bgClass = bgColors[color] || bgColors.indigo;
 
   return (
-    <div className={`${bgClass} text-white px-6 py-10 rounded-b-[3rem] shadow-lg relative overflow-hidden w-full transition-all duration-500`}>
+    <div className={`${bgClass} text-white px-6 py-10 rounded-b-[3rem] shadow-lg relative overflow-hidden w-full transition-all duration-500 shrink-0`}>
       <div className="absolute -right-8 -top-8 opacity-10 rotate-12 pointer-events-none"><Ticket size={180} /></div>
       <div className="flex justify-between items-start relative z-10">
         <div className="w-full pr-4 animate-in slide-in-from-left duration-500">
@@ -476,6 +488,7 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
+  // Merchant Setup Form
   const [mStoreName, setMStoreName] = useState("");
   const [mLocation, setMLocation] = useState("");
   const [mCategory, setMCategory] = useState("Food");
@@ -505,8 +518,8 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
 
   if (authMode === 'forgot_password') {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
-        <div className="w-full max-w-sm animate-in fade-in duration-500">
+      <div className="min-h-full flex flex-col items-center justify-center p-6 bg-white">
+        <div className="w-full animate-in fade-in duration-500">
            <h2 className="text-3xl font-black mb-2 text-slate-900">รีเซ็ตรหัสผ่าน</h2>
            <p className="text-sm text-slate-500 mb-8">ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่อีเมลของคุณ</p>
            <input type="email" placeholder="กรอกอีเมลของคุณ" value={email} onChange={(e: any) => setEmail(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:border-indigo-500 outline-none font-medium mb-4"/>
@@ -518,8 +531,8 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-white">
-      <div className="w-full max-w-sm animate-in fade-in duration-700">
+    <div className="min-h-full flex flex-col items-center justify-center p-6 bg-white">
+      <div className="w-full animate-in fade-in duration-700 pb-10">
         
         {authMode !== 'merchant_setup' && (
           <div className="flex flex-col items-center mb-8">
@@ -533,8 +546,8 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
         {authMode === 'role_setup' ? (
           <div className="space-y-4 animate-in slide-in-from-bottom-4">
             <p className="text-center text-slate-500 font-bold text-xs uppercase tracking-widest mb-6">เลือกบทบาทของคุณ</p>
-            <RoleButton icon={<User />} title="นักศึกษา" onClick={() => onRoleSelect('student')} color="indigo" />
-            <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => onRoleSelect('guest')} color="blue" />
+            <RoleButton icon={<User />} title="นักศึกษา" onClick={() => user ? onRoleSelect('student') : onGoogleAuth('student')} color="indigo" />
+            <RoleButton icon={<Users />} title="บุคคลทั่วไป" onClick={() => user ? onRoleSelect('guest') : onGoogleAuth('guest')} color="blue" />
             <RoleButton icon={<Store />} title="ร้านค้า (Partner)" onClick={() => setAuthMode('merchant_setup')} color="orange" />
             
             <div className="text-center mt-6 pt-4 border-t border-slate-100">
@@ -585,10 +598,17 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
         ) : (
           <>
             {/* Google Sign-In */}
-            <button onClick={onGoogleAuth} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-6 active:scale-95">
+            <button onClick={onGoogleAuth} className="w-full bg-white border border-slate-200 text-slate-700 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm mb-4 active:scale-95">
               <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Sign in with Google
             </button>
+
+            {/* Student Notice */}
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-6 text-center">
+              <p className="text-[11px] text-indigo-600">
+                <span className="font-bold">สำหรับนักศึกษา:</span> โปรดเข้าสู่ระบบด้วยอีเมล <span className="font-mono">@lamduan.mfu.ac.th</span> เท่านั้น
+              </p>
+            </div>
 
             <div className="flex items-center gap-4 mb-6">
               <div className="h-px bg-slate-200 flex-1"></div>
@@ -647,7 +667,7 @@ function RoleButton({ icon, title, onClick, color }: any) {
 }
 
 /* ==================== ADMIN DASHBOARD ==================== */
-function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions, allPayouts, systemSettings, onLogout, showToast, user, userData, onEditName, setIsActionLoading, isActionLoading }: any) {
+function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions, allPayouts, allReports, systemSettings, onLogout, showToast, user, userData, onEditName, setIsActionLoading, isActionLoading }: any) {
   const [adminTab, setAdminTab] = useState<'overview' | 'slips' | 'partners' | 'users' | 'settings'>('overview');
   const [selectedMerchantForDetails, setSelectedMerchantForDetails] = useState<UserData | null>(null);
   const db = getFirestore();
@@ -661,6 +681,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   const pendingMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && !u.isApproved && !u.isRejected);
   const approvedMerchants = allUsers.filter((u: UserData) => u.role === 'merchant' && u.isApproved);
   const studentAndGuests = allUsers.filter((u: UserData) => u.role === 'student' || u.role === 'guest');
+  const pendingReports = allReports?.filter((r: ReportIssue) => r.status === 'pending') || [];
   
   // Advanced Financial Calculations (With Safe Fallbacks)
   const sysPrice = Number(systemSettings?.pricePerSet) || 79;
@@ -687,6 +708,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   const handleApproveSlip = async (slip: PurchaseSlip) => {
     try {
       const db = getFirestore();
+      // Feature 1: Pass is specific to Merchant
       const passQuery = query(collection(db, 'passes'), where('studentUid', '==', slip.studentUid), where('merchantId', '==', slip.merchantId));
       const passDocs = await getDocs(passQuery);
       const addedCoupons = 5 * slip.numSets;
@@ -741,7 +763,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-white">
+    <div className="flex flex-col min-h-full bg-slate-950 text-white">
       <Header title="Admin Console" subtitle="System Control" onLogout={onLogout} user={user} userData={userData} onEditName={onEditName} color="slate" showToast={showToast} />
       
       <div className="px-6 pt-2 pb-2 flex gap-2 overflow-x-auto scrollbar-hide bg-slate-950 shrink-0">
@@ -807,6 +829,23 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
                 </div>
               ))}
             </div>
+            
+            {/* Reports Section */}
+            {pendingReports.length > 0 && (
+              <div>
+                <h3 className="font-bold text-slate-300 mb-4 text-sm uppercase tracking-widest">ปัญหาจากผู้ใช้ ({pendingReports.length})</h3>
+                {pendingReports.map((r: ReportIssue) => (
+                  <div key={r.id} className="bg-red-500/10 p-5 rounded-3xl mb-3 border border-red-500/20">
+                    <p className="text-sm text-red-400 font-medium mb-2">"{r.issue}"</p>
+                    <p className="text-[10px] text-slate-500 font-mono mb-4">{r.email}</p>
+                    <button onClick={() => { updateDoc(doc(db, 'reports', r.id), { status: 'resolved' }); showToast("Resolved", "success"); }} 
+                      className="w-full bg-red-600/20 text-red-400 font-bold py-3 rounded-xl text-xs hover:bg-red-600/40">
+                      Mark as Resolved
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -886,7 +925,7 @@ function AdminDashboardView({ allPurchases, allUsers, allPasses, allRedemptions,
         {adminTab === 'users' && (
           <div className="space-y-3 animate-in fade-in">
             {studentAndGuests.map((u: any) => {
-              const pass = allPasses.find((p: any) => p.studentUid === u.uid);
+              const pass = allPasses.find((p: Pass) => p.studentUid === u.uid);
               return (
                 <div key={u.uid} className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center">
                   <div className="truncate pr-2">
@@ -1013,7 +1052,7 @@ function StudentDashboardView({ user, userData, myPasses, allUsers, pendingPurch
   ].sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
 
   return (
-    <div className="flex flex-col h-screen bg-[#F9FAFB] max-w-md mx-auto w-full relative">
+    <div className="flex flex-col min-h-full bg-[#F9FAFB] relative">
       <Header title="My Wallet" subtitle={userData?.role} user={user} userData={userData} onLogout={onLogout} onEditName={onEditName} showToast={showToast} color="indigo" />
       
       <div className="flex-1 overflow-y-auto px-5 pt-6 pb-12 space-y-6 z-10 relative">
@@ -1142,7 +1181,7 @@ function MerchantDashboardView({ user, userData, redemptions, merchantSales, mer
   };
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] flex flex-col font-sans w-full pb-12 max-w-md mx-auto relative">
+    <div className="flex flex-col min-h-full bg-[#F9FAFB] relative">
       <Header title="Shop Center" subtitle={userData?.storeName || "Shop Console"} color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
       
       <div className="px-5 flex-1 w-full pt-6 space-y-6 animate-in slide-in-from-bottom-4 relative z-10">
@@ -1180,7 +1219,7 @@ function MerchantDashboardView({ user, userData, redemptions, merchantSales, mer
                </button>
             </div>
 
-            <div>
+            <div className="pb-10">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 px-2">ประวัติการใช้คูปองวันนี้</h3>
               <div className="space-y-3">
                 {redemptions.filter((r: Redemption) => new Date(r.redeemedAt).toDateString() === new Date().toDateString()).length === 0 ? (
@@ -1249,18 +1288,18 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
   };
 
   return (
-    <div className="min-h-screen bg-white p-6 font-sans flex flex-col max-w-md mx-auto w-full animate-in fade-in">
-      <div className="flex items-center justify-between mb-6 pt-4">
+    <div className="flex flex-col min-h-full bg-white p-6 font-sans animate-in fade-in">
+      <div className="flex items-center justify-between mb-6 pt-4 shrink-0">
         <button onClick={onBack} className="p-3 bg-slate-50 rounded-2xl text-slate-600 hover:bg-slate-100 active:scale-90"><ChevronLeft size={20}/></button>
         <h2 className="text-2xl font-black text-slate-900 italic tracking-tighter">Buy Pass</h2>
         <div className="w-12"></div>
       </div>
 
-      <div className="flex-1 space-y-5">
+      <div className="flex-1 space-y-5 overflow-y-auto pb-6">
         
         <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">1. เลือกร้านค้าที่จะใช้คูปอง</p>
-          <select value={selectedMerchant} onChange={e => setSelectedMerchant(e.target.value)} className="w-full p-4 rounded-2xl border border-slate-200 outline-none font-bold text-slate-700">
+          <select value={selectedMerchant} onChange={(e: any) => setSelectedMerchant(e.target.value)} className="w-full p-4 rounded-2xl border border-slate-200 outline-none font-bold text-slate-700">
             <option value="">-- เลือกร้านค้า --</option>
             {availableMerchants.map((m: UserData) => (
               <option key={m.uid} value={m.uid}>{m.storeName} ({m.location})</option>
@@ -1299,7 +1338,7 @@ function BuyPassView({ settings, allUsers, onBack, user, showToast }: any) {
         </div>
       </div>
 
-      <button onClick={handleConfirm} disabled={!slip || !selectedMerchant || isLoading} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[1.5rem] text-lg mt-6 active:scale-95 disabled:opacity-50 shadow-xl shadow-indigo-200/50">
+      <button onClick={handleConfirm} disabled={!slip || !selectedMerchant || isLoading} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[1.5rem] text-lg mt-2 active:scale-95 disabled:opacity-50 shadow-xl shadow-indigo-200/50 shrink-0">
         {isLoading ? <Loader2 className="animate-spin mx-auto"/> : "ยืนยันส่งหลักฐาน"}
       </button>
     </div>
@@ -1396,17 +1435,17 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
   const passesForSelection = myPasses.filter((p: Pass) => p.remainingCoupons >= useCount);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col items-center justify-center max-w-md mx-auto font-sans relative overflow-y-auto pb-10">
+    <div className="flex flex-col min-h-full bg-slate-950 text-white p-6 font-sans relative">
       <div className="absolute top-8 left-6 z-10">
         <button onClick={onBack} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl text-white active:scale-90"><ChevronLeft size={24}/></button>
       </div>
 
-      <div className="w-full mt-16 animate-in slide-in-from-bottom-8 duration-500">
+      <div className="w-full mt-16 animate-in slide-in-from-bottom-8 duration-500 overflow-y-auto pb-10">
         <h2 className="text-3xl font-black mb-6 italic tracking-tighter text-center text-indigo-400">Scan to Pay</h2>
         
         <div className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 mb-6 shadow-xl">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">1. เลือกร้านที่จะใช้คูปอง</p>
-          <select value={selectedPassId} onChange={e => setSelectedPassId(e.target.value)} className="w-full bg-black/50 text-sm font-bold p-4 rounded-xl border border-slate-700 outline-none focus:border-indigo-500 text-indigo-300">
+          <select value={selectedPassId} onChange={(e: any) => setSelectedPassId(e.target.value)} className="w-full bg-black/50 text-sm font-bold p-4 rounded-xl border border-slate-700 outline-none focus:border-indigo-500 text-indigo-300">
             <option value="">-- เลือกร้านค้า --</option>
             {passesForSelection.map((p: Pass) => {
               const storeName = allUsers.find((u: UserData) => u.uid === p.merchantId)?.storeName || 'Unknown Store';
@@ -1415,7 +1454,7 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
           </select>
         </div>
 
-        <div className={`w-full aspect-square bg-black rounded-[3rem] relative overflow-hidden flex items-center justify-center border border-slate-800 shadow-2xl mb-6 ${isScanning ? 'border-indigo-500 shadow-[0_0_60px_rgba(99,102,241,0.3)]' : ''}`}>
+        <div className={`w-full aspect-square max-h-[300px] bg-black rounded-[3rem] relative overflow-hidden flex items-center justify-center border border-slate-800 shadow-2xl mb-6 ${isScanning ? 'border-indigo-500 shadow-[0_0_60px_rgba(99,102,241,0.3)]' : ''}`}>
           {isScanning ? (
             <div id="qr-reader" className="w-full h-full bg-black absolute inset-0"></div>
           ) : (
@@ -1449,7 +1488,7 @@ function ScanQRView({ onBack, myPasses, myRedemptions, allUsers, user, onSuccess
           </div>
 
           <button onClick={handleRedeem} disabled={!shopId || !selectedPassId || isProcessing} className="w-full bg-indigo-600 py-4 rounded-2xl font-black text-lg active:scale-95 disabled:opacity-50">
-            {isProcessing ? <Loader2 className="animate-spin mx-auto" size={24}/> : `ยืนยันใช้ ${useCount} คูปอง`}
+            {isProcessing ? <Loader2 className="animate-spin mx-auto" size={24}/> : `ยืนยันจ่าย ${useCount} คูปอง`}
           </button>
         </div>
       </div>
@@ -1470,7 +1509,7 @@ function SuccessView({ onDone }: any) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#10b981] text-white flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500 max-w-md mx-auto w-full relative overflow-hidden">
+    <div className="flex flex-col min-h-full bg-[#10b981] text-white items-center justify-center p-8 text-center animate-in fade-in duration-500 relative overflow-hidden">
       <div className="bg-white/20 p-4 rounded-full mb-8 relative z-10">
         <div className="bg-white text-[#10b981] p-8 rounded-full shadow-2xl animate-bounce">
           <CheckCircle size={80} strokeWidth={3.5} />
