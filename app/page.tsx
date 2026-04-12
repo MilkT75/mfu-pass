@@ -6,13 +6,13 @@ import {
   Clock, ChevronLeft, Mail, Lock, UserPlus, LogIn, Users, 
   Upload, CheckCircle, Camera, LogOut, Settings, Save, RefreshCw, 
   Plus, Minus, Eye, EyeOff, Copy, Sparkles, Image as ImageIcon,
-  XCircle, ScanLine
+  XCircle, ScanLine, Edit2
 } from "lucide-react";
 
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, signOut 
+  signInWithEmailAndPassword, signOut, updateProfile
 } from "firebase/auth";
 
 import { 
@@ -24,6 +24,7 @@ import {
 interface UserData {
   uid: string;
   email: string;
+  displayName?: string;
   role: 'student' | 'merchant' | 'admin' | 'guest';
   isApproved: boolean;
 }
@@ -72,7 +73,6 @@ export default function MFUPassApp() {
   const [redemptions, setRedemptions] = useState<any[]>([]);
   const [systemSettings, setSystemSettings] = useState<AppSettings>({ pricePerSet: 79, promptPayQr: null });
 
-  // Custom Toast System
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -91,6 +91,9 @@ export default function MFUPassApp() {
       setUser(currentUser);
       if (currentUser) {
         if (currentUser.email === ADMIN_EMAIL) {
+          // ดึงข้อมูล Admin จาก DB (ถ้ามีตั้งค่าชื่อไว้)
+          const adminSnap = await getDoc(doc(db, 'users', currentUser.uid));
+          if (adminSnap.exists()) setUserData(adminSnap.data() as UserData);
           setCurrentView('admin');
         } else {
           const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
@@ -124,43 +127,54 @@ export default function MFUPassApp() {
       if (snap.exists()) setSystemSettings(snap.data() as AppSettings);
     }));
 
-    if (['student', 'guest'].includes(currentView)) {
+    if (['student', 'guest'].includes(currentView) || currentView === 'buy_pass' || currentView === 'scan_qr') {
       unsubs.push(onSnapshot(collection(db, 'passes'), (snap) => {
-        const myPass = snap.docs.find(d => d.data().studentUid === user.uid);
+        const myPass = snap.docs.find((d: any) => d.data().studentUid === user.uid);
         setActivePass(myPass ? { id: myPass.id, ...myPass.data() } : null);
       }));
 
       unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
-        const pending = snap.docs.find(d => d.data().studentUid === user.uid && d.data().status === 'pending');
+        const pending = snap.docs.find((d: any) => d.data().studentUid === user.uid && d.data().status === 'pending');
         setPendingPurchase(pending ? { id: pending.id, ...pending.data() } : null);
       }));
     }
 
     if (currentView === 'merchant') {
       unsubs.push(onSnapshot(collection(db, 'redemptions'), (snap) => {
-        setRedemptions(snap.docs.filter(d => d.data().merchantId === user.uid).map(d => d.data()));
+        setRedemptions(snap.docs.filter((d: any) => d.data().merchantId === user.uid).map((d: any) => d.data()));
       }));
     }
 
     if (currentView === 'admin') {
       unsubs.push(onSnapshot(collection(db, 'purchases'), (snap) => {
-        setAllPendingSlips(snap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseSlip)));
+        setAllPendingSlips(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as PurchaseSlip)));
       }));
 
       unsubs.push(onSnapshot(collection(db, 'users'), (snap) => {
-        setAllPendingMerchants(snap.docs.filter(d => d.data().role === 'merchant' && d.data().isApproved === false).map(d => ({ id: d.id, ...d.data() })));
+        setAllPendingMerchants(snap.docs.filter((d: any) => d.data().role === 'merchant' && d.data().isApproved === false).map((d: any) => ({ id: d.id, ...d.data() })));
       }));
     }
+
+    // Listener สำหรับอัปเดต Profile แบบ Realtime เผื่อมีการเปลี่ยนชื่อ
+    unsubs.push(onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      if (snap.exists()) setUserData(snap.data() as UserData);
+    }));
 
     return () => unsubs.forEach(unsub => unsub());
   }, [user, currentView]);
 
-  const handleAuthAction = async (email: string, pass: string) => {
+  const handleAuthAction = async (email: string, pass: string, displayName?: string) => {
     setIsActionLoading(true);
     try {
       const auth = getAuth();
-      if (authMode === 'register') await createUserWithEmailAndPassword(auth, email, pass);
-      else await signInWithEmailAndPassword(auth, email, pass);
+      if (authMode === 'register') {
+        const userCred = await createUserWithEmailAndPassword(auth, email, pass);
+        if (displayName) {
+          await updateProfile(userCred.user, { displayName });
+        }
+      } else {
+        await signInWithEmailAndPassword(auth, email, pass);
+      }
     } catch (e: any) {
       let msg = "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
       if (e.code === 'auth/email-already-in-use') msg = "อีเมลนี้มีผู้ใช้งานแล้ว";
@@ -177,15 +191,26 @@ export default function MFUPassApp() {
     if (!user) return;
     setIsActionLoading(true);
     const db = getFirestore();
-    await setDoc(doc(db, 'users', user.uid), {
+    const data = {
       uid: user.uid,
       email: user.email,
+      displayName: user.displayName || user.email.split('@')[0], // ดึงชื่อจาก Profile มาเซ็ตเป็นค่าเริ่มต้น
       role,
       isApproved: role !== 'merchant',
       createdAt: serverTimestamp()
-    }, { merge: true });
+    };
+    await setDoc(doc(db, 'users', user.uid), data, { merge: true });
     setCurrentView(role);
     setIsActionLoading(false);
+  };
+
+  const handleEditName = async () => {
+    const newName = prompt("ตั้งชื่อผู้ใช้งาน (Display Name) ใหม่:", userData?.displayName || "");
+    if (newName && newName.trim() !== "") {
+      const db = getFirestore();
+      await updateDoc(doc(db, 'users', user.uid), { displayName: newName.trim() }, { merge: true } as any);
+      showToast("อัปเดตชื่อผู้ใช้งานสำเร็จ", "success");
+    }
   };
 
   if (!isAppReady) {
@@ -198,7 +223,6 @@ export default function MFUPassApp() {
 
   return (
     <div className="relative">
-      {/* Toast Notification Container */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in w-[90%] max-w-sm">
           <div className={`px-6 py-4 rounded-2xl font-bold text-white shadow-xl flex items-center justify-center gap-2 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'info' ? 'bg-blue-500' : 'bg-green-500'}`}>
@@ -210,9 +234,9 @@ export default function MFUPassApp() {
       )}
 
       {currentView === 'auth' && <AuthScreenView authMode={authMode} setAuthMode={setAuthMode} onAuth={handleAuthAction} onRoleSelect={handleRoleSelect} isActionLoading={isActionLoading} user={user} showToast={showToast} />}
-      {currentView === 'admin' && <AdminDashboardView allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} />}
-      {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} />}
-      {currentView === 'merchant' && <MerchantDashboardView user={user} redemptions={redemptions} onLogout={handleLogout} showToast={showToast} />}
+      {currentView === 'admin' && <AdminDashboardView allPendingSlips={allPendingSlips} allPendingMerchants={allPendingMerchants} systemSettings={systemSettings} onLogout={handleLogout} showToast={showToast} user={user} userData={userData} onEditName={handleEditName} />}
+      {(currentView === 'student' || currentView === 'guest') && <StudentDashboardView user={user} userData={userData} activePass={activePass} pendingPurchase={pendingPurchase} onLogout={handleLogout} onBuyPass={() => setCurrentView('buy_pass')} onScan={() => setCurrentView('scan_qr')} showToast={showToast} onEditName={handleEditName} />}
+      {currentView === 'merchant' && <MerchantDashboardView user={user} userData={userData} redemptions={redemptions} onLogout={handleLogout} showToast={showToast} onEditName={handleEditName} />}
       {currentView === 'buy_pass' && <BuyPassView settings={systemSettings} onBack={() => setCurrentView(userData?.role || 'student')} user={user} showToast={showToast} />}
       {currentView === 'scan_qr' && <ScanQRView onBack={() => setCurrentView(userData?.role || 'student')} activePass={activePass} user={user} onSuccess={() => setCurrentView('success')} showToast={showToast} />}
       {currentView === 'success' && <SuccessView onDone={() => setCurrentView(userData?.role || 'student')} />}
@@ -222,7 +246,7 @@ export default function MFUPassApp() {
 
 /* ==================== SUB COMPONENTS ==================== */
 
-function Header({ title, subtitle, color = "indigo", onLogout, user, showToast }: any) {
+function Header({ title, subtitle, color = "indigo", onLogout, user, userData, showToast, onEditName }: any) {
   return (
     <div className={`bg-${color}-600 text-white px-6 py-8 md:py-10 rounded-b-[3rem] shadow-xl relative overflow-hidden max-w-2xl mx-auto w-full`}>
       <div className="absolute -right-8 -top-8 opacity-10 rotate-12 pointer-events-none">
@@ -231,23 +255,32 @@ function Header({ title, subtitle, color = "indigo", onLogout, user, showToast }
       <div className="flex justify-between items-start">
         <div className="relative z-10">
           <h2 className="text-3xl md:text-4xl font-black italic tracking-tighter">{title}</h2>
-          <p className="text-white/70 text-sm font-medium">{subtitle}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-white/90 text-sm font-bold uppercase tracking-widest truncate max-w-[200px]">
+              {userData?.displayName || subtitle}
+            </p>
+            {onEditName && (
+              <button onClick={onEditName} className="text-white/50 hover:text-white transition-colors bg-white/10 p-1.5 rounded-lg active:scale-90">
+                <Edit2 size={14} />
+              </button>
+            )}
+          </div>
         </div>
         {onLogout && (
-          <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 px-4 py-3 rounded-2xl transition-all relative z-10">
+          <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 px-4 py-3 rounded-2xl transition-all relative z-10 active:scale-95">
             <LogOut size={22} />
           </button>
         )}
       </div>
       {user && (
-        <div className="mt-6 bg-white/10 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between text-xs relative z-10">
-          <div className="font-mono truncate max-w-[180px]">{user.uid}</div>
+        <div className="mt-6 bg-black/20 backdrop-blur-md rounded-2xl p-4 flex items-center justify-between text-xs relative z-10 border border-white/10">
+          <div className="font-mono truncate max-w-[180px] text-white/80">{user.uid}</div>
           <button 
             onClick={() => { 
               navigator.clipboard.writeText(user.uid); 
               showToast("คัดลอก UID เรียบร้อย", "success"); 
             }}
-            className="text-white/80 hover:text-white flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 bg-white/10 rounded-lg transition-colors"
+            className="text-white hover:text-white flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 bg-white/10 rounded-lg transition-colors active:scale-95"
           >
             <Copy size={14} /> COPY
           </button>
@@ -265,23 +298,25 @@ function Card({ children, className = "" }: any) {
 function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionLoading, showToast }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.includes("@") || !email.includes(".")) return showToast("รูปแบบอีเมลไม่ถูกต้อง", "error");
     if (password.length < 6) return showToast("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร", "error");
-    onAuth(email, password);
+    if (authMode === 'register' && !displayName.trim()) return showToast("กรุณากรอกชื่อผู้ใช้งาน", "error");
+    onAuth(email, password, displayName);
   };
 
   return (
     <div className="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-4 md:p-8 font-sans">
-      <div className="w-full max-w-md md:max-w-lg bg-white rounded-[2.5rem] shadow-2xl p-8 md:p-12 animate-in zoom-in duration-500">
+      <div className="w-full max-w-md md:max-w-lg bg-white rounded-[2.5rem] shadow-2xl p-8 md:p-12 animate-in zoom-in duration-500 border border-slate-50">
         <div className="flex flex-col items-center mb-10">
-          <div className="w-20 h-20 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-indigo-200 shadow-xl mb-6">
+          <div className="w-20 h-20 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-indigo-200 shadow-xl mb-6 rotate-3">
             <Ticket size={40} className="text-white" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-black italic tracking-tighter">MFU Pass</h1>
+          <h1 className="text-4xl md:text-5xl font-black italic tracking-tighter text-slate-900">MFU Pass</h1>
         </div>
 
         {authMode === 'role_setup' ? (
@@ -294,12 +329,26 @@ function AuthScreenView({ authMode, setAuthMode, onAuth, onRoleSelect, isActionL
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="bg-slate-50 rounded-3xl p-2 border border-slate-100 shadow-inner">
+              
+              {authMode === 'register' && (
+                <>
+                  <div className="relative">
+                    <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                    <input type="text" placeholder="ชื่อผู้ใช้งาน (Display Name)" value={displayName} onChange={(e: any) => setDisplayName(e.target.value)}
+                      className="w-full pl-14 pr-4 py-5 rounded-2xl bg-transparent outline-none font-bold text-slate-700 text-lg" required />
+                  </div>
+                  <div className="h-[1px] bg-slate-200 mx-4"></div>
+                </>
+              )}
+
               <div className="relative">
                 <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
                 <input type="email" placeholder="อีเมล" value={email} onChange={(e: any) => setEmail(e.target.value)}
                   className="w-full pl-14 pr-4 py-5 rounded-2xl bg-transparent outline-none font-bold text-slate-700 text-lg" required />
               </div>
+              
               <div className="h-[1px] bg-slate-200 mx-4"></div>
+              
               <div className="relative">
                 <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
                 <input type={showPassword ? "text" : "password"} placeholder="รหัสผ่าน (6 ตัวอักษรขึ้นไป)" value={password} onChange={(e: any) => setPassword(e.target.value)}
@@ -335,7 +384,7 @@ function RoleButton({ icon, title, onClick, color }: any) {
 }
 
 /* Admin Dashboard */
-function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettings, onLogout, showToast }: any) {
+function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettings, onLogout, showToast, user, userData, onEditName }: any) {
   const [pricePerSet, setPricePerSet] = useState(systemSettings.pricePerSet || 79);
   const [promptPayQr, setPromptPayQr] = useState(systemSettings.promptPayQr || "");
   const db = getFirestore();
@@ -371,9 +420,15 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
 
   return (
     <div className="min-h-screen bg-slate-950 text-white px-4 py-8 md:px-8 font-sans max-w-3xl mx-auto pb-20">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-black text-indigo-400 italic">Admin Console</h1>
-        <button onClick={onLogout} className="bg-white/10 p-3 rounded-2xl hover:bg-white/20"><LogOut size={20} /></button>
+      <div className="flex justify-between items-start mb-8">
+        <div>
+          <h1 className="text-3xl font-black text-indigo-400 italic">Admin Console</h1>
+          <div className="flex items-center gap-2 mt-2">
+            <span className="bg-indigo-600 px-3 py-1 rounded-lg text-[10px] uppercase tracking-widest font-bold">{userData?.displayName || 'Super Admin'}</span>
+            <button onClick={onEditName} className="text-slate-500 hover:text-white transition-colors bg-white/10 p-1.5 rounded-lg active:scale-90"><Edit2 size={12} /></button>
+          </div>
+        </div>
+        <button onClick={onLogout} className="bg-white/10 p-3 rounded-2xl hover:bg-white/20 active:scale-95"><LogOut size={20} /></button>
       </div>
 
       <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-8 mb-8 border border-slate-800 shadow-2xl">
@@ -426,10 +481,11 @@ function AdminDashboardView({ allPendingSlips, allPendingMerchants, systemSettin
   );
 }
 
-function StudentDashboardView({ user, activePass, pendingPurchase, onLogout, onBuyPass, onScan, showToast }: any) {
+function StudentDashboardView({ user, userData, activePass, pendingPurchase, onLogout, onBuyPass, onScan, showToast, onEditName }: any) {
+  const roleName = userData?.role === 'guest' ? 'Guest' : 'Student';
   return (
     <div className="min-h-screen bg-[#F2F2F7] flex flex-col font-sans pb-12 max-w-2xl mx-auto w-full">
-      <Header title="My Wallet" subtitle={user?.email} user={user} onLogout={onLogout} showToast={showToast} />
+      <Header title="My Wallet" subtitle={roleName} user={user} userData={userData} onLogout={onLogout} showToast={showToast} onEditName={onEditName} />
       <div className="px-6 flex-1 space-y-8 animate-in slide-in-from-bottom-8 duration-500">
         <Card className="p-10 border-indigo-50 shadow-indigo-100/50">
           {pendingPurchase ? (
@@ -462,7 +518,7 @@ function StudentDashboardView({ user, activePass, pendingPurchase, onLogout, onB
             <div className="text-center py-6">
               <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner"><Ticket size={40} className="text-slate-300"/></div>
               <h3 className="font-black text-2xl text-slate-800 mb-2">กระเป๋าว่างเปล่า</h3>
-              <p className="text-slate-500 text-sm mb-8 px-4">ซื้อพาสใหม่เพื่อรับคูปองส่วนลด 5 ใบ (มูลค่า 100 บาท) สำหรับใช้ที่โรงอาหาร</p>
+              <p className="text-slate-500 text-sm mb-8 px-4">ซื้อพาสใหม่เพื่อรับคูปองส่วนลด 5 ใบ สำหรับใช้ที่โรงอาหาร</p>
               <button onClick={onBuyPass} className="w-full bg-indigo-600 text-white font-black py-6 rounded-[2rem] text-xl active:scale-95 shadow-xl shadow-indigo-200 transition-all">ซื้อพาสใหม่</button>
             </div>
           )}
@@ -548,10 +604,10 @@ function BuyPassView({ settings, onBack, user, showToast }: any) {
   );
 }
 
-function MerchantDashboardView({ user, redemptions, onLogout, showToast }: any) {
+function MerchantDashboardView({ user, userData, redemptions, onLogout, showToast, onEditName }: any) {
   return (
     <div className="min-h-screen bg-orange-50 flex flex-col font-sans max-w-2xl mx-auto w-full pb-12">
-      <Header title="Shop Center" subtitle={`Store ID: ${user?.uid?.slice(0,8)}`} color="orange" onLogout={onLogout} user={user} showToast={showToast} />
+      <Header title="Shop Center" subtitle="Shop Console" color="orange" onLogout={onLogout} user={user} userData={userData} showToast={showToast} onEditName={onEditName} />
       <div className="px-6 -mt-8 flex-1 animate-in slide-in-from-bottom-8 duration-700">
         <Card className="text-center p-12 border-none shadow-orange-100/60 relative overflow-hidden">
           <div className="absolute -top-10 -left-10 w-40 h-40 bg-orange-100 rounded-full blur-3xl opacity-50"></div>
@@ -571,45 +627,51 @@ function MerchantDashboardView({ user, redemptions, onLogout, showToast }: any) 
 function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
   const [shopId, setShopId] = useState("");
   const [isScanning, setIsScanning] = useState(false);
-  const [scriptLoaded, setScriptLoaded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // โหลดไลบรารีสแกนคิวอาร์ (html5-qrcode) จาก CDN
-  useEffect(() => {
-    if (!(window as any).Html5QrcodeScanner) {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/html5-qrcode';
-      script.async = true;
-      script.onload = () => setScriptLoaded(true);
-      document.body.appendChild(script);
-    } else {
-      setScriptLoaded(true);
-    }
-  }, []);
-
-  // จัดการตัวสแกนเนอร์เมื่อเปิดกล้อง
+  // ระบบโหลด Html5Qrcode แบบ Dynamic (ทำงานเมื่อกดปุ่มเปิดกล้องเท่านั้น)
   useEffect(() => {
     let scanner: any = null;
-    if (scriptLoaded && isScanning) {
-      scanner = new (window as any).Html5QrcodeScanner(
-        "qr-reader",
-        { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
-        false
-      );
-      scanner.render(
-        (decodedText: string) => {
-          setShopId(decodedText);
-          setIsScanning(false);
-          showToast("สแกนสำเร็จ กรุณากดยืนยัน", "success");
-          scanner.clear();
-        },
-        (error: any) => { /* ignore normal errors */ }
-      );
+
+    if (isScanning) {
+      const initScanner = async () => {
+        // ถ้ายืม Library มายังไม่โหลด ให้โหลดจาก CDN
+        if (!(window as any).Html5QrcodeScanner) {
+          await new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/html5-qrcode';
+            script.async = true;
+            script.onload = resolve;
+            document.head.appendChild(script);
+          });
+        }
+        
+        if (!isScanning) return; // ป้องกันบั๊กกรณีผู้ใช้กดยกเลิกก่อนโหลดเสร็จ
+        
+        scanner = new (window as any).Html5QrcodeScanner(
+          "qr-reader",
+          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+          false
+        );
+        
+        scanner.render(
+          (decodedText: string) => {
+            setShopId(decodedText);
+            setIsScanning(false);
+            showToast("สแกนสำเร็จ กรุณากดยืนยัน", "success");
+            if (scanner) scanner.clear();
+          },
+          (error: any) => { /* ignore normal scanning errors */ }
+        );
+      };
+      
+      initScanner();
     }
+
     return () => {
       if (scanner) scanner.clear().catch(console.error);
     };
-  }, [scriptLoaded, isScanning]);
+  }, [isScanning]);
 
   const handleRedeem = async () => {
     if (!shopId || !activePass) return showToast("กรุณาระบุ Shop ID", "error");
@@ -630,16 +692,16 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
     <div className="min-h-screen bg-slate-950 text-white p-6 md:p-10 flex flex-col items-center justify-center max-w-2xl mx-auto w-full font-sans">
       <h2 className="text-3xl font-black mb-10 italic text-indigo-400">REDEEM COUPON</h2>
       
-      {/* ส่วนแสดงผลกล้อง หรือ ไอคอนกล้อง */}
+      {/* ส่วนแสดงผลกล้อง */}
       <div className={`w-full max-w-sm aspect-square border-4 border-indigo-500 rounded-[3rem] flex flex-col items-center justify-center bg-black mb-8 relative overflow-hidden transition-all ${isScanning ? 'shadow-[0_0_50px_rgba(99,102,241,0.4)]' : ''}`}>
         {isScanning ? (
-          <div id="qr-reader" className="w-full h-full bg-black"></div>
+          <div id="qr-reader" className="w-full h-full bg-white flex flex-col items-center justify-center"></div>
         ) : (
           <>
             <Camera size={80} className="text-slate-600 mb-6" />
             <button 
               onClick={() => setIsScanning(true)} 
-              className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 px-6 py-3 rounded-full font-bold text-sm flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all"
+              className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 px-6 py-3 rounded-full font-bold text-sm flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all active:scale-95"
             >
               <ScanLine size={18} /> เปิดกล้องสแกน QR
             </button>
@@ -647,7 +709,7 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
         )}
       </div>
 
-      <div className="w-full max-w-sm bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800">
+      <div className="w-full max-w-sm bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl">
         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 text-center">หรือกรอก Shop ID ด้วยตนเอง</p>
         <input type="text" placeholder="PASTE SHOP ID" value={shopId} onChange={(e: any) => setShopId(e.target.value)}
           className="w-full bg-black/50 text-center text-xl font-mono p-5 rounded-2xl border border-slate-700 outline-none focus:border-indigo-500 transition-all text-indigo-200 uppercase mb-6" />
@@ -658,13 +720,13 @@ function ScanQRView({ onBack, activePass, user, onSuccess, showToast }: any) {
 
       <button onClick={onBack} className="mt-10 text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors">ยกเลิก</button>
       
-      {/* สไตล์จำกัด UI ของ html5-qrcode ที่แทรกเข้ามาให้ดูเรียบร้อยขึ้น */}
+      {/* สไตล์จำกัด UI ของ html5-qrcode ให้ดูพรีเมียมขึ้น */}
       <style>{`
-        #qr-reader { border: none !important; }
+        #qr-reader { border: none !important; width: 100% !important; border-radius: 2.5rem; }
         #qr-reader__scan_region { min-height: 100% !important; background: black; }
-        #qr-reader__dashboard_section_csr span { color: white !important; font-family: sans-serif; }
+        #qr-reader__dashboard_section_csr span { color: white !important; font-family: sans-serif; font-size: 12px; }
         #qr-reader__dashboard_section_swaplink { color: #818cf8 !important; text-decoration: none; margin-top: 10px; display: inline-block; font-weight: bold; font-family: sans-serif;}
-        #qr-reader button { background: #4f46e5 !important; border: none; color: white; padding: 10px 20px; border-radius: 12px; font-weight: bold; cursor: pointer; font-family: sans-serif; }
+        #qr-reader button { background: #4f46e5 !important; border: none; color: white; padding: 10px 20px; border-radius: 12px; font-weight: bold; cursor: pointer; font-family: sans-serif; margin-top: 10px; }
         #qr-reader__camera_selection { background: #1e293b; color: white; border: 1px solid #334155; padding: 10px; border-radius: 12px; margin-bottom: 10px; width: 90%; outline: none; }
       `}</style>
     </div>
